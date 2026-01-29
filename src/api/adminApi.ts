@@ -8,6 +8,7 @@ import type {
   RefreshTokenResponse,
   CacheHealthResponse,
   NasHealthResponse,
+  StorageConsistencyQuery,
   StorageConsistencyResponse,
   SyncEventsResponse,
   AdminSharesResponse,
@@ -45,7 +46,8 @@ async function apiCall<T>(
   method: string,
   url: string,
   token?: string,
-  data?: unknown
+  data?: unknown,
+  params?: Record<string, unknown>
 ): Promise<T> {
   const startTime = Date.now();
   const logEntry: AdminApiLogEntry = {
@@ -63,6 +65,7 @@ async function apiCall<T>(
       method,
       url,
       data,
+      params,
       headers: token ? { Authorization: `Bearer ${token}` } : undefined,
     });
 
@@ -130,7 +133,21 @@ export const adminSystemApi = {
   getNasHealth: (token: string): Promise<NasHealthResponse> =>
     apiCall<NasHealthResponse>('GET', '/admin/nas/health-check', token),
 
- 
+  /**
+   * 스토리지 일관성 검증
+   * DB와 실제 스토리지 간의 일관성을 확인합니다.
+   */
+  getStorageConsistency: (
+    token: string,
+    query?: StorageConsistencyQuery
+  ): Promise<StorageConsistencyResponse> =>
+    apiCall<StorageConsistencyResponse>(
+      'GET',
+      '/admin/storage/consistency',
+      token,
+      undefined,
+      query as Record<string, unknown>
+    ),
 
   /**
    * 동기화 이벤트 조회

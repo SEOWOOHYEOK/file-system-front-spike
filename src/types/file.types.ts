@@ -1,0 +1,694 @@
+/**
+ * 파일/폴더/휴지통 API 타입 정의
+ * 200.파일, 210.폴더, 220.휴지통
+ */
+
+// ============================================
+// 공통 타입
+// ============================================
+
+/**
+ * 파일 상태
+ */
+export type FileState = 'ACTIVE' | 'TRASHED' | 'DELETED';
+
+/**
+ * 폴더 상태
+ */
+export type FolderState = 'ACTIVE' | 'TRASHED';
+
+/**
+ * 파일 스토리지 가용성 상태
+ */
+export type AvailabilityStatus = 'AVAILABLE' | 'SYNCING' | 'UNAVAILABLE' | 'ERROR';
+
+/**
+ * 폴더 스토리지 가용성 상태
+ */
+export type FolderAvailabilityStatus = 'AVAILABLE' | 'SYNCING' | 'UNAVAILABLE' | 'ERROR';
+
+/**
+ * 파일 충돌 전략
+ */
+export type ConflictStrategy = 'ERROR' | 'RENAME';
+
+/**
+ * 파일 이동 충돌 전략
+ */
+export type MoveConflictStrategy = 'ERROR' | 'OVERWRITE' | 'RENAME' | 'SKIP';
+
+/**
+ * 폴더 충돌 전략
+ */
+export type FolderConflictStrategy = 'ERROR' | 'RENAME';
+
+/**
+ * 폴더 이동 충돌 전략
+ */
+export type MoveFolderConflictStrategy = 'ERROR' | 'RENAME' | 'SKIP';
+
+// ============================================
+// 200.파일 (File)
+// ============================================
+
+/**
+ * 스토리지 상태
+ */
+export interface StorageStatus {
+  cache: AvailabilityStatus | null;
+  nas: AvailabilityStatus | null;
+}
+
+/**
+ * 파일 정보 응답
+ */
+export interface FileInfoResponse {
+  id: string;
+  name: string;
+  folderId: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  state: FileState;
+  storageStatus: StorageStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 파일 목록 아이템
+ */
+export interface FileListItem {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  storageStatus: StorageStatus;
+  updatedAt: string;
+}
+
+/**
+ * 파일 업로드 응답
+ */
+export interface UploadFileResponse {
+  id: string;
+  name: string;
+  folderId: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  storageStatus: {
+    cache: 'AVAILABLE';
+    nas: 'SYNCING';
+  };
+  createdAt: string;
+  syncEventId: string;
+}
+
+/**
+ * 파일명 변경 요청
+ */
+export interface RenameFileRequest {
+  newName: string;
+  conflictStrategy?: ConflictStrategy;
+}
+
+/**
+ * 파일명 변경 응답
+ */
+export interface RenameFileResponse {
+  id: string;
+  name: string;
+  path: string;
+  storageStatus: {
+    nas: 'SYNCING';
+  };
+  updatedAt: string;
+  syncEventId: string;
+}
+
+/**
+ * 파일 이동 요청
+ */
+export interface MoveFileRequest {
+  targetFolderId: string;
+  conflictStrategy?: MoveConflictStrategy;
+}
+
+/**
+ * 파일 이동 응답
+ */
+export interface MoveFileResponse {
+  id: string;
+  name: string;
+  folderId: string;
+  path: string;
+  skipped?: boolean;
+  reason?: string;
+  storageStatus: {
+    nas: 'SYNCING';
+  };
+  updatedAt: string;
+  syncEventId?: string;
+}
+
+/**
+ * 파일 삭제(휴지통 이동) 응답
+ */
+export interface DeleteFileResponse {
+  id: string;
+  name: string;
+  state: FileState;
+  trashedAt: string;
+  syncEventId: string;
+}
+
+// ============================================
+// 210.폴더 (Folder)
+// ============================================
+
+/**
+ * 폴더 스토리지 상태
+ */
+export interface FolderStorageStatus {
+  nas: FolderAvailabilityStatus | null;
+}
+
+/**
+ * 폴더 정보 응답
+ */
+export interface FolderInfoResponse {
+  id: string;
+  name: string;
+  parentId: string | null;
+  path: string;
+  state: FolderState;
+  storageStatus: FolderStorageStatus;
+  fileCount: number;
+  folderCount: number;
+  totalSize: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * 브레드크럼 아이템
+ */
+export interface BreadcrumbItem {
+  id: string;
+  name: string;
+}
+
+/**
+ * 폴더 목록 아이템
+ */
+export interface FolderListItem {
+  id: string;
+  name: string;
+  path: string;
+  storageStatus: FolderStorageStatus;
+  fileCount: number;
+  folderCount: number;
+  updatedAt: string;
+}
+
+/**
+ * 파일 목록 아이템 (폴더 내용 조회용)
+ */
+export interface FileListItemInFolder {
+  id: string;
+  name: string;
+  size: number;
+  mimeType: string;
+  storageStatus: {
+    cache: string | null;
+    nas: string | null;
+  };
+  updatedAt: string;
+}
+
+/**
+ * 페이지네이션 정보
+ */
+export interface PaginationInfo {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
+}
+
+/**
+ * 폴더 내용 응답
+ */
+export interface FolderContentsResponse {
+  folderId: string;
+  path: string;
+  breadcrumbs: BreadcrumbItem[];
+  folders: FolderListItem[];
+  files: FileListItemInFolder[];
+  pagination: PaginationInfo;
+}
+
+/**
+ * 폴더 내용 조회 쿼리 파라미터
+ */
+export interface GetFolderContentsQuery {
+  sortBy?: 'name' | 'type' | 'createdAt' | 'updatedAt' | 'size';
+  sortOrder?: 'asc' | 'desc';
+  page?: number;
+  pageSize?: number;
+}
+
+/**
+ * 폴더 생성 요청
+ */
+export interface CreateFolderRequest {
+  name: string;
+  parentId: string | null;
+  conflictStrategy?: FolderConflictStrategy;
+}
+
+/**
+ * 폴더 생성 응답
+ */
+export interface CreateFolderResponse {
+  id: string;
+  name: string;
+  parentId: string | null;
+  path: string;
+  storageStatus: {
+    nas: 'SYNCING';
+  };
+  createdAt: string;
+}
+
+/**
+ * 폴더명 변경 요청
+ */
+export interface RenameFolderRequest {
+  newName: string;
+  conflictStrategy?: FolderConflictStrategy;
+}
+
+/**
+ * 폴더명 변경 응답
+ */
+export interface RenameFolderResponse {
+  id: string;
+  name: string;
+  path: string;
+  storageStatus: {
+    nas: 'SYNCING';
+  };
+  updatedAt: string;
+}
+
+/**
+ * 폴더 이동 요청
+ */
+export interface MoveFolderRequest {
+  targetParentId: string;
+  conflictStrategy?: MoveFolderConflictStrategy;
+}
+
+/**
+ * 폴더 이동 응답
+ */
+export interface MoveFolderResponse {
+  id: string;
+  name: string;
+  parentId: string;
+  path: string;
+  skipped?: boolean;
+  reason?: string;
+  storageStatus: {
+    nas: 'SYNCING';
+  };
+  updatedAt: string;
+}
+
+// ============================================
+// 220.휴지통 (Trash)
+// ============================================
+
+/**
+ * 휴지통 정렬 기준
+ */
+export type TrashSortBy = 'name' | 'sizeBytes' | 'mimeType' | 'deletedAt' | 'expiresAt' | 'deletedBy';
+
+/**
+ * 휴지통 정렬 순서
+ */
+export type TrashSortOrder = 'asc' | 'desc';
+
+/**
+ * MIME 카테고리
+ */
+export type MimeCategory = 'image' | 'video' | 'audio' | 'document' | 'archive' | 'other';
+
+/**
+ * 복원 경로 상태
+ */
+export type RestorePathStatus = 'AVAILABLE' | 'NOT_FOUND';
+
+/**
+ * 휴지통 목록 조회 쿼리 파라미터
+ */
+export interface TrashListQuery {
+  page?: number;
+  limit?: number;
+  sortBy?: TrashSortBy;
+  order?: TrashSortOrder;
+  search?: string;
+  mimeType?: string;
+  mimeCategory?: MimeCategory;
+  deletedBy?: string;
+  deletedAfter?: string;
+  deletedBefore?: string;
+  expiresAfter?: string;
+  expiresBefore?: string;
+  minSize?: number;
+  maxSize?: number;
+  originalFolderId?: string;
+}
+
+/**
+ * 휴지통 아이템
+ */
+export interface TrashItem {
+  type: 'FILE';
+  id: string;
+  name: string;
+  sizeBytes: number;
+  mimeType: string;
+  extension: string;
+  trashMetadataId: string;
+  originalPath: string;
+  originalFolderId: string;
+  originalFolderName: string;
+  deletedAt: string;
+  deletedBy: string;
+  deletedByName: string;
+  expiresAt: string;
+  daysUntilExpiry: number;
+  createdAt: string;
+  restoreInfo: {
+    pathStatus: RestorePathStatus;
+    resolveFolderId: string | null;
+  };
+}
+
+/**
+ * 휴지통 목록 응답
+ */
+export interface TrashListResponse {
+  items: TrashItem[];
+  totalCount: number;
+  totalSizeBytes: number;
+  pagination: {
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNext: boolean;
+    hasPrev: boolean;
+  };
+  appliedFilters: {
+    search?: string;
+    mimeType?: string;
+    mimeCategory?: string;
+    deletedBy?: string;
+    dateRange?: { from?: string; to?: string };
+    sizeRange?: { min?: number; max?: number };
+  };
+}
+
+/**
+ * 복원 미리보기 요청
+ */
+export interface RestorePreviewRequest {
+  trashMetadataIds?: string[];
+}
+
+/**
+ * 복원 미리보기 응답 항목
+ */
+export interface RestorePreviewItem {
+  trashMetadataId: string;
+  fileId: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  deletedAt: string;
+  pathStatus: RestorePathStatus;
+  originalPath: string;
+  originalFolderId: string;
+  resolveFolderId: string | null;
+  hasConflict: boolean;
+  conflictFileId?: string;
+}
+
+/**
+ * 복원 미리보기 응답
+ */
+export interface RestorePreviewResponse {
+  totalCount: number;
+  items: RestorePreviewItem[];
+  summary: {
+    available: number;
+    notFound: number;
+    conflict: number;
+  };
+}
+
+/**
+ * 복원 실행 요청 항목
+ */
+export interface RestoreExecuteItem {
+  trashMetadataId: string;
+  targetFolderId?: string;
+  exclude?: boolean;
+}
+
+/**
+ * 복원 실행 요청
+ */
+export interface RestoreExecuteRequest {
+  items: RestoreExecuteItem[];
+}
+
+/**
+ * 복원 실행 응답
+ */
+export interface RestoreExecuteResponse {
+  message: string;
+  queued: number;
+  excluded: number;
+  skipped: number;
+  syncEventIds: string[];
+  skippedItems: {
+    trashMetadataId: string;
+    fileName: string;
+    reason: 'CONFLICT' | 'PATH_NOT_FOUND';
+    conflictFileId?: string;
+  }[];
+}
+
+/**
+ * 복원 상태 조회 응답
+ */
+export interface RestoreStatusResponse {
+  summary: {
+    total: number;
+    pending: number;
+    processing: number;
+    done: number;
+    failed: number;
+  };
+  isCompleted: boolean;
+  items: {
+    syncEventId: string;
+    fileId: string;
+    fileName: string;
+    status: 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED';
+    errorMessage?: string;
+    createdAt: string;
+    processedAt?: string;
+  }[];
+}
+
+/**
+ * 영구삭제 응답
+ */
+export interface PurgeResponse {
+  id: string;
+  name: string;
+  type: 'FILE';
+  purgedAt: string;
+}
+
+/**
+ * 휴지통 비우기 응답
+ */
+export interface EmptyTrashResponse {
+  message: string;
+  success: number;
+  failed: number;
+}
+
+// ============================================
+// 201.멀티파트 업로드 (Multipart Upload)
+// ============================================
+
+/**
+ * 업로드 세션 상태
+ */
+export type UploadSessionStatus = 'INIT' | 'UPLOADING' | 'COMPLETED' | 'ABORTED' | 'EXPIRED';
+
+/**
+ * 멀티파트 업로드 초기화 요청
+ */
+export interface InitiateMultipartRequest {
+  fileName: string;
+  folderId: string;
+  totalSize: number;
+  mimeType: string;
+  conflictStrategy?: ConflictStrategy;
+}
+
+/**
+ * 멀티파트 업로드 초기화 응답
+ */
+export interface InitiateMultipartResponse {
+  sessionId: string;
+  uploadId?: string;
+  partSize: number;
+  totalParts: number;
+  expiresAt: string;
+}
+
+/**
+ * 파트 업로드 응답
+ */
+export interface UploadPartResponse {
+  partNumber: number;
+  etag: string;
+  size: number;
+  sessionProgress: number;
+}
+
+/**
+ * 멀티파트 업로드 완료 요청
+ */
+export interface CompleteMultipartRequest {
+  parts?: { partNumber: number; etag: string }[];
+}
+
+/**
+ * 멀티파트 업로드 완료 응답
+ */
+export interface CompleteMultipartResponse {
+  fileId: string;
+  name: string;
+  folderId: string;
+  path: string;
+  size: number;
+  mimeType: string;
+  storageStatus: {
+    cache: 'AVAILABLE';
+    nas: 'SYNCING';
+  };
+  createdAt: string;
+  syncEventId: string;
+}
+
+/**
+ * 세션 상태 조회 응답
+ */
+export interface SessionStatusResponse {
+  sessionId: string;
+  fileName: string;
+  status: UploadSessionStatus;
+  totalSize: number;
+  uploadedBytes: number;
+  progress: number;
+  totalParts: number;
+  completedParts: number[];
+  nextPartNumber: number | null;
+  remainingBytes: number;
+  expiresAt: string;
+  fileId?: string;
+}
+
+/**
+ * 업로드 취소 응답
+ */
+export interface AbortSessionResponse {
+  sessionId: string;
+  status: 'ABORTED';
+  message: string;
+}
+
+// ============================================
+// 250.동기화 (Sync Event)
+// ============================================
+
+/**
+ * 동기화 이벤트 상태
+ */
+export type SyncEventStatus = 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED';
+
+/**
+ * 동기화 이벤트 타입
+ */
+export type SyncEventType = 'CREATE' | 'MOVE' | 'DELETE' | 'RENAME' | 'TRASH' | 'RESTORE' | 'PURGE';
+
+/**
+ * 동기화 이벤트 상태 응답
+ */
+export interface SyncEventStatusResponse {
+  id: string;
+  eventType: SyncEventType;
+  targetType: 'FILE' | 'FOLDER';
+  status: SyncEventStatus;
+  progress: number;
+  retryCount: number;
+  errorMessage?: string;
+  createdAt: string;
+  processedAt?: string;
+}
+
+/**
+ * 파일 동기화 상태 응답
+ */
+export interface FileSyncStatusResponse {
+  fileId: string;
+  storageStatus: {
+    cache: 'AVAILABLE' | 'MISSING';
+    nas: 'AVAILABLE' | 'SYNCING' | 'ERROR';
+  };
+  activeSyncEvent?: {
+    id: string;
+    eventType: string;
+    status: string;
+    progress: number;
+    createdAt: string;
+  };
+}
+
+// ============================================
+// API 로그 타입
+// ============================================
+
+export interface FileApiLogEntry {
+  id: string;
+  method: string;
+  url: string;
+  status: number;
+  duration: number;
+  request?: unknown;
+  response?: unknown;
+  error?: string;
+  timestamp: Date;
+}

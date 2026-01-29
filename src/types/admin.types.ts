@@ -61,6 +61,13 @@ export interface NasHealthResponse {
   error?: string;
 }
 
+export interface StorageConsistencyQuery {
+  storageType?: 'cache' | 'nas';
+  limit?: number;
+  offset?: number;
+  sample?: boolean;
+}
+
 export interface StorageConsistencyResponse {
   consistent: boolean;
   totalFiles: number;
