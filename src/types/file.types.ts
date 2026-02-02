@@ -631,6 +631,92 @@ export interface AbortSessionResponse {
 }
 
 // ============================================
+// 210.검색 (Search)
+// ============================================
+
+/**
+ * 검색 결과 아이템 타입
+ */
+export type SearchResultType = 'file' | 'folder';
+
+/**
+ * 검색 정렬 기준
+ */
+export type SearchSortBy = 'name' | 'type' | 'createdAt' | 'updatedAt' | 'size';
+
+/**
+ * 검색 정렬 순서
+ */
+export type SearchSortOrder = 'asc' | 'desc';
+
+/**
+ * 검색 쿼리 파라미터
+ */
+export interface SearchQuery {
+  /** 검색 키워드 (최소 2자) */
+  keyword: string;
+  /** 검색 대상 타입 (미지정 시 전체 검색) */
+  type?: SearchResultType;
+  /** 정렬 기준 */
+  sortBy?: SearchSortBy;
+  /** 정렬 순서 */
+  sortOrder?: SearchSortOrder;
+  /** 페이지 번호 (1부터 시작) */
+  page?: number;
+  /** 페이지 크기 (기본값: 50, 최대: 100) */
+  pageSize?: number;
+}
+
+/**
+ * 검색 결과 - 폴더 아이템
+ */
+export interface SearchFolderItem {
+  id: string;
+  name: string;
+  type: 'folder';
+  /** 폴더의 전체 경로 */
+  path: string;
+  /** 부모 폴더 ID (루트인 경우 null) */
+  parentId: string | null;
+  updatedAt: string;
+}
+
+/**
+ * 검색 결과 - 파일 아이템
+ */
+export interface SearchFileItem {
+  id: string;
+  name: string;
+  type: 'file';
+  /** 파일이 위치한 폴더의 경로 */
+  path: string;
+  /** 파일이 속한 폴더 ID */
+  folderId: string;
+  /** 파일 크기 (bytes) */
+  size: number;
+  /** MIME 타입 */
+  mimeType: string;
+  updatedAt: string;
+}
+
+/**
+ * 검색 결과 아이템 (Union Type)
+ */
+export type SearchResultItem = SearchFolderItem | SearchFileItem;
+
+/**
+ * 검색 응답
+ */
+export interface SearchResponse {
+  /** 검색 결과 목록 */
+  results: SearchResultItem[];
+  /** 페이지네이션 정보 */
+  pagination: PaginationInfo;
+  /** 검색어 */
+  keyword: string;
+}
+
+// ============================================
 // 250.동기화 (Sync Event)
 // ============================================
 

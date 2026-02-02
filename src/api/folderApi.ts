@@ -14,6 +14,8 @@ import type {
   MoveFolderRequest,
   MoveFolderResponse,
   FileApiLogEntry,
+  SearchQuery,
+  SearchResponse,
 } from '../types/file.types';
 
 const api = axios.create({
@@ -151,6 +153,13 @@ export const folderApi = {
     request: MoveFolderRequest
   ): Promise<MoveFolderResponse> =>
     apiCall<MoveFolderResponse>('POST', `/folders/${folderId}/move`, token, request),
+
+  /**
+   * 파일/폴더 검색
+   * GET /v1/folders/search
+   */
+  search: (token: string, query: SearchQuery): Promise<SearchResponse> =>
+    apiCall<SearchResponse>('GET', '/folders/search', token, undefined, query as unknown as Record<string, unknown>),
 };
 
 export default folderApi;

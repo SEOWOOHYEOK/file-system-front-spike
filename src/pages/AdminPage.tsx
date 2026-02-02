@@ -26,6 +26,10 @@ import type {
   TrashListResponse,
   FileListItemInFolder,
   FolderListItem,
+  SearchQuery,
+  SearchResponse,
+  SearchResultItem,
+  SearchFileItem,
 } from '../types/file.types';
 import type {
   UserWithEmployee,
@@ -60,9 +64,13 @@ export function AdminPage() {
     addFiles,
     removeFile,
     startUpload,
+    pauseUpload,
+    resumeUpload,
     cancelUpload,
     cancelAll,
     clearCompleted,
+    loadPendingSessions,
+    getPendingSessions,
     isUploading,
   } = useMultipartUpload();
 
@@ -88,6 +96,14 @@ export function AdminPage() {
   // ============================================
   const [currentFolder, setCurrentFolder] = useState<FolderInfoResponse | null>(null);
   const [folderContents, setFolderContents] = useState<FolderContentsResponse | null>(null);
+
+  // ============================================
+  // 210.검색 상태
+  // ============================================
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchType, setSearchType] = useState<'all' | 'file' | 'folder'>('all');
+  const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
+  const [isSearchMode, setIsSearchMode] = useState(false);
 
   // ============================================
   // 220.휴지통 상태
@@ -118,7 +134,30 @@ export function AdminPage() {
     userSync: false,
     upload: false,
     action: false,
+    search: false,
   });
+
+  // 미완료 세션 존재 여부
+  const [hasPendingSessions, setHasPendingSessions] = useState(false);
+
+  // 미완료 세션 확인
+  useEffect(() => {
+    const sessions = getPendingSessions();
+    setHasPendingSessions(sessions.length > 0);
+  }, [getPendingSessions]);
+
+  // 미완료 세션 불러오기 핸들러
+  const handleLoadPendingSessions = useCallback(async () => {
+    if (!auth.token) return;
+    await loadPendingSessions(auth.token);
+    setHasPendingSessions(false);
+  }, [auth.token, loadPendingSessions]);
+
+  // 이어서 업로드 핸들러
+  const handleResumeUpload = useCallback(async (id: string, file?: File) => {
+    if (!auth.token) return;
+    await resumeUpload(id, auth.token, file);
+  }, [auth.token, resumeUpload]);
 
   // API 로그
   const [logs, setLogs] = useState<ApiLogEntry[]>([]);
@@ -251,6 +290,50 @@ export function AdminPage() {
     if (!auth.token || !currentFolder) return;
     await navigateToFolder(currentFolder.id);
   }, [auth.token, currentFolder, navigateToFolder]);
+
+  // ============================================
+  // 210.검색 API 호출
+  // ============================================
+  const handleSearch = useCallback(async () => {
+    if (!auth.token || !searchKeyword.trim() || searchKeyword.trim().length < 2) {
+      alert('검색어는 최소 2자 이상 입력해주세요.');
+      return;
+    }
+    setLoading((prev) => ({ ...prev, search: true }));
+    try {
+      const query: SearchQuery = {
+        keyword: searchKeyword.trim(),
+        type: searchType === 'all' ? undefined : searchType,
+        pageSize: 50,
+      };
+      const response = await folderApi.search(auth.token, query);
+      setSearchResults(response);
+      setIsSearchMode(true);
+    } catch (error) {
+      console.error('Failed to search:', error);
+      alert('검색에 실패했습니다.');
+    } finally {
+      setLoading((prev) => ({ ...prev, search: false }));
+    }
+  }, [auth.token, searchKeyword, searchType]);
+
+  const clearSearch = useCallback(() => {
+    setSearchKeyword('');
+    setSearchResults(null);
+    setIsSearchMode(false);
+  }, []);
+
+  const navigateToSearchResult = useCallback(async (item: SearchResultItem) => {
+    if (!auth.token) return;
+    // 검색 결과에서 해당 폴더로 이동
+    if (item.type === 'folder') {
+      await navigateToFolder(item.id);
+    } else {
+      // 파일인 경우 해당 파일이 속한 폴더로 이동
+      await navigateToFolder(item.folderId);
+    }
+    clearSearch();
+  }, [auth.token, navigateToFolder, clearSearch]);
 
   // ============================================
   // 200.파일 API 호출
@@ -728,8 +811,97 @@ export function AdminPage() {
                 </div>
               </div>
 
-              {/* Breadcrumbs */}
-              {folderContents && (
+              {/* 검색 영역 */}
+              <div className="bg-gray-50 rounded p-3 mb-4">
+                <div className="flex items-center space-x-2">
+                  <input
+                    type="text"
+                    value={searchKeyword}
+                    onChange={(e) => setSearchKeyword(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                    placeholder="파일/폴더 검색 (최소 2자)"
+                    className="flex-1 px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  />
+                  <select
+                    value={searchType}
+                    onChange={(e) => setSearchType(e.target.value as 'all' | 'file' | 'folder')}
+                    className="px-3 py-2 border rounded text-sm focus:outline-none focus:ring-2 focus:ring-blue-300"
+                  >
+                    <option value="all">전체</option>
+                    <option value="file">파일만</option>
+                    <option value="folder">폴더만</option>
+                  </select>
+                  <button
+                    onClick={handleSearch}
+                    disabled={loading.search || !searchKeyword.trim()}
+                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm rounded disabled:opacity-50"
+                  >
+                    {loading.search ? '검색 중...' : '검색'}
+                  </button>
+                  {isSearchMode && (
+                    <button
+                      onClick={clearSearch}
+                      className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white text-sm rounded"
+                    >
+                      검색 취소
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* 검색 결과 */}
+              {isSearchMode && searchResults && (
+                <div className="mb-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="font-medium text-gray-900">
+                      검색 결과: "{searchResults.keyword}" ({searchResults.pagination.totalItems}건)
+                    </h4>
+                  </div>
+                  {searchResults.results.length > 0 ? (
+                    <div className="space-y-1 max-h-96 overflow-y-auto border rounded p-2">
+                      {searchResults.results.map((item) => (
+                        <div
+                          key={item.id}
+                          onClick={() => navigateToSearchResult(item)}
+                          className="flex items-center p-2 rounded hover:bg-gray-100 cursor-pointer"
+                        >
+                          <span className={item.type === 'folder' ? 'text-yellow-500' : 'text-blue-500'} style={{ marginRight: '8px' }}>
+                            {item.type === 'folder' ? '📁' : '📄'}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <div className="font-medium truncate">{item.name}</div>
+                            <div className="text-xs text-gray-500 truncate">
+                              경로: {item.path}
+                              {item.type === 'file' && (
+                                <span className="ml-2">
+                                  | 크기: {formatBytes((item as SearchFileItem).size)}
+                                  | 타입: {(item as SearchFileItem).mimeType}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <span className={`px-2 py-0.5 rounded text-xs ${
+                            item.type === 'folder' ? 'bg-yellow-100 text-yellow-800' : 'bg-blue-100 text-blue-800'
+                          }`}>
+                            {item.type === 'folder' ? '폴더' : '파일'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-gray-400 text-center py-4">검색 결과가 없습니다</p>
+                  )}
+                  {/* 페이지네이션 정보 */}
+                  {searchResults.pagination.totalPages > 1 && (
+                    <div className="mt-2 text-sm text-gray-500 text-center">
+                      {searchResults.pagination.page} / {searchResults.pagination.totalPages} 페이지
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Breadcrumbs - 검색 모드가 아닐 때만 표시 */}
+              {!isSearchMode && folderContents && (
                 <div className="flex items-center space-x-2 mb-4 text-sm">
                   {folderContents.breadcrumbs.map((crumb, idx) => (
                     <span key={crumb.id} className="flex items-center">
@@ -745,8 +917,8 @@ export function AdminPage() {
                 </div>
               )}
 
-              {/* Current Folder Info & Actions */}
-              {currentFolder && (
+              {/* Current Folder Info & Actions - 검색 모드가 아닐 때만 표시 */}
+              {!isSearchMode && currentFolder && (
                 <div className="bg-gray-50 rounded p-3 mb-4">
                   <div className="flex items-center justify-between">
                     <div className="text-sm">
@@ -803,8 +975,8 @@ export function AdminPage() {
                 </div>
               )}
 
-              {/* Folder Contents */}
-              {folderContents ? (
+              {/* Folder Contents - 검색 모드가 아닐 때만 표시 */}
+              {!isSearchMode && folderContents ? (
                 <div className="space-y-1">
                   {/* Folders */}
                   {folderContents.folders.map((folder) => (
@@ -912,9 +1084,9 @@ export function AdminPage() {
                     <p className="text-sm text-gray-400 text-center py-4">빈 폴더입니다</p>
                   )}
                 </div>
-              ) : (
+              ) : !isSearchMode ? (
                 <p className="text-sm text-gray-400">루트 폴더 조회 버튼을 클릭하세요</p>
-              )}
+              ) : null}
             </div>
           )}
 
@@ -958,6 +1130,8 @@ export function AdminPage() {
                 onAddFiles={addFiles}
                 onRemoveFile={removeFile}
                 onCancelFile={(id) => auth.token && cancelUpload(id, auth.token)}
+                onPauseFile={pauseUpload}
+                onResumeFile={handleResumeUpload}
                 onStartUpload={() => {
                   if (auth.token && currentFolder) {
                     startUpload(auth.token, currentFolder.id);
@@ -969,6 +1143,8 @@ export function AdminPage() {
                 onClearCompleted={clearCompleted}
                 isUploading={isUploading}
                 disabled={!auth.token || !currentFolder}
+                hasPendingSessions={hasPendingSessions}
+                onLoadPendingSessions={handleLoadPendingSessions}
               />
 
               {/* 안내 */}
@@ -977,7 +1153,10 @@ export function AdminPage() {
                 <ul className="list-disc list-inside space-y-1 text-blue-700">
                   <li>100MB 이상의 파일은 자동으로 10MB 청크로 분할 업로드됩니다.</li>
                   <li>100MB 미만의 파일은 일반 업로드로 처리됩니다.</li>
-                  <li>업로드 중 취소하거나 브라우저를 닫으면 세션이 만료됩니다 (24시간).</li>
+                  <li>업로드 중 ⏸️ 버튼을 클릭하여 일시정지할 수 있습니다.</li>
+                  <li>일시정지된 파일은 ▶️ 버튼을 클릭하여 이어서 업로드할 수 있습니다.</li>
+                  <li>브라우저를 닫아도 세션이 24시간 동안 유지되며, 다시 접속 시 이어서 업로드할 수 있습니다.</li>
+                  <li>새로고침 후 이어서 업로드하려면 같은 파일을 다시 선택해야 합니다.</li>
                   <li>NAS 동기화는 업로드 완료 후 비동기로 진행됩니다.</li>
                 </ul>
               </div>

@@ -59,7 +59,7 @@ function getFileIcon(fileName: string, mimeType: string): { icon: string; color:
 /**
  * 상태별 색상 및 텍스트
  */
-function getStatusInfo(status: UploadFileStatus, uploadProgress: number, syncProgress: number): {
+function getStatusInfo(status: UploadFileStatus, uploadProgress: number, _syncProgress: number): {
   barColor: string;
   text: string;
   textColor: string;
@@ -69,6 +69,8 @@ function getStatusInfo(status: UploadFileStatus, uploadProgress: number, syncPro
       return { barColor: 'bg-gray-300', text: '대기 중', textColor: 'text-gray-500' };
     case 'uploading':
       return { barColor: 'bg-blue-500', text: `${uploadProgress}%`, textColor: 'text-blue-600' };
+    case 'paused':
+      return { barColor: 'bg-yellow-500', text: `일시정지 (${uploadProgress}%)`, textColor: 'text-yellow-600' };
     case 'syncing':
       return { barColor: 'bg-orange-500', text: '동기화 중...', textColor: 'text-orange-600' };
     case 'completed':
@@ -91,6 +93,8 @@ function calculateProgress(status: UploadFileStatus, uploadProgress: number, syn
       return 0;
     case 'uploading':
       return uploadProgress;
+    case 'paused':
+      return uploadProgress;
     case 'syncing':
       // 업로드 완료 후 동기화 진행률 표시 (업로드 80% + 동기화 20%)
       return 80 + (syncProgress * 0.2);
@@ -111,13 +115,28 @@ interface FileItemProps {
   uploadFile: UploadFile;
   onRemove: () => void;
   onCancel: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
+  needsFileForResume?: boolean;
 }
 
 /**
  * 파일 아이템 컴포넌트
  */
-const FileItem: React.FC<FileItemProps> = ({ uploadFile, onRemove, onCancel }) => {
-  const { icon, color } = getFileIcon(uploadFile.file.name, uploadFile.file.type);
+const FileItem: React.FC<FileItemProps> = ({ 
+  uploadFile, 
+  onRemove, 
+  onCancel, 
+  onPause, 
+  onResume,
+  needsFileForResume = false,
+}) => {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileName = uploadFile.file?.name || '파일을 다시 선택해주세요';
+  const fileType = uploadFile.file?.type || '';
+  const fileSize = uploadFile.file?.size || 0;
+  
+  const { icon, color } = getFileIcon(fileName, fileType);
   const { barColor, text, textColor } = getStatusInfo(
     uploadFile.status,
     uploadFile.uploadProgress,
@@ -129,22 +148,33 @@ const FileItem: React.FC<FileItemProps> = ({ uploadFile, onRemove, onCancel }) =
     uploadFile.syncProgress
   );
 
-  const canRemove = ['completed', 'error', 'cancelled', 'pending'].includes(uploadFile.status);
   const canCancel = ['uploading', 'syncing'].includes(uploadFile.status);
+  const canPause = uploadFile.status === 'uploading' && onPause;
+  const canResume = (uploadFile.status === 'paused' || uploadFile.status === 'error') && onResume;
+
+  // 파일 선택 후 이어서 업로드
+  const handleFileSelectForResume = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file && onResume) {
+      // onResume에서 file을 전달하기 위해 커스텀 이벤트 사용
+      (onResume as (file?: File) => void)(file);
+    }
+  };
 
   return (
     <div className="flex items-center gap-3 p-3 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
       {/* 파일 아이콘 */}
       <div className={`text-2xl ${color}`}>
         {uploadFile.status === 'completed' ? '✅' : 
-         uploadFile.status === 'error' ? '❌' : icon}
+         uploadFile.status === 'error' ? '❌' : 
+         uploadFile.status === 'paused' ? '⏸️' : icon}
       </div>
 
       {/* 파일 정보 및 진행률 */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between">
           <div className="truncate font-medium text-gray-800">
-            {uploadFile.file.name}
+            {fileName}
           </div>
           <div className={`text-sm font-medium ${textColor} whitespace-nowrap ml-2`}>
             {text}
@@ -152,8 +182,8 @@ const FileItem: React.FC<FileItemProps> = ({ uploadFile, onRemove, onCancel }) =
         </div>
         
         <div className="text-xs text-gray-500 mb-1">
-          {formatFileSize(uploadFile.file.size)}
-          {uploadFile.status === 'uploading' && uploadFile.totalParts > 0 && (
+          {fileSize > 0 ? formatFileSize(fileSize) : '크기 정보 없음'}
+          {(uploadFile.status === 'uploading' || uploadFile.status === 'paused') && uploadFile.totalParts > 0 && (
             <span className="ml-2">
               ({uploadFile.completedParts.length}/{uploadFile.totalParts} 파트)
             </span>
@@ -174,29 +204,128 @@ const FileItem: React.FC<FileItemProps> = ({ uploadFile, onRemove, onCancel }) =
             {uploadFile.error}
           </div>
         )}
+
+        {/* 파일 다시 선택 안내 (새로고침 후 이어서 업로드 시) */}
+        {needsFileForResume && uploadFile.status === 'paused' && !uploadFile.file && (
+          <div className="text-xs text-yellow-600 mt-1">
+            이어서 업로드하려면 파일을 다시 선택해주세요
+          </div>
+        )}
       </div>
 
-      {/* 제거/취소 버튼 */}
-      <button
-        onClick={canCancel ? onCancel : onRemove}
-        className="p-1 hover:bg-gray-200 rounded transition-colors"
-        title={canCancel ? '취소' : '제거'}
-      >
-        <svg
-          xmlns="http://www.w3.org/2000/svg"
-          className="h-5 w-5 text-gray-400 hover:text-gray-600"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
+      {/* 액션 버튼들 */}
+      <div className="flex items-center gap-1">
+        {/* 일시정지 버튼 */}
+        {canPause && (
+          <button
+            onClick={onPause}
+            className="p-1 hover:bg-yellow-100 rounded transition-colors"
+            title="일시정지"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5 text-yellow-500 hover:text-yellow-600"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"
+              />
+            </svg>
+          </button>
+        )}
+
+        {/* 이어서 업로드 버튼 */}
+        {canResume && (
+          <>
+            {needsFileForResume && !uploadFile.file ? (
+              // 파일 선택이 필요한 경우
+              <>
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="p-1 hover:bg-green-100 rounded transition-colors"
+                  title="파일 선택 후 이어서 업로드"
+                >
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="h-5 w-5 text-green-500 hover:text-green-600"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"
+                    />
+                  </svg>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  className="hidden"
+                  onChange={handleFileSelectForResume}
+                />
+              </>
+            ) : (
+              // 파일이 있는 경우 바로 이어서 업로드
+              <button
+                onClick={() => onResume && onResume()}
+                className="p-1 hover:bg-green-100 rounded transition-colors"
+                title="이어서 업로드"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="h-5 w-5 text-green-500 hover:text-green-600"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"
+                  />
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+              </button>
+            )}
+          </>
+        )}
+
+        {/* 제거/취소 버튼 */}
+        <button
+          onClick={canCancel ? onCancel : onRemove}
+          className="p-1 hover:bg-gray-200 rounded transition-colors"
+          title={canCancel ? '취소' : '제거'}
         >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M6 18L18 6M6 6l12 12"
-          />
-        </svg>
-      </button>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            className="h-5 w-5 text-gray-400 hover:text-gray-600"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M6 18L18 6M6 6l12 12"
+            />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 };
@@ -209,11 +338,15 @@ interface FileUploadManagerProps {
   onAddFiles: (files: File[]) => void;
   onRemoveFile: (id: string) => void;
   onCancelFile: (id: string) => void;
+  onPauseFile?: (id: string) => void;
+  onResumeFile?: (id: string, file?: File) => void;
   onStartUpload: () => void;
   onCancelAll: () => void;
   onClearCompleted: () => void;
   isUploading: boolean;
   disabled?: boolean;
+  hasPendingSessions?: boolean;
+  onLoadPendingSessions?: () => void;
 }
 
 /**
@@ -224,11 +357,15 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
   onAddFiles,
   onRemoveFile,
   onCancelFile,
+  onPauseFile,
+  onResumeFile,
   onStartUpload,
   onCancelAll,
   onClearCompleted,
   isUploading,
   disabled = false,
+  hasPendingSessions = false,
+  onLoadPendingSessions,
 }) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -265,12 +402,14 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
     total: uploadFiles.length,
     pending: uploadFiles.filter((f) => f.status === 'pending').length,
     uploading: uploadFiles.filter((f) => f.status === 'uploading' || f.status === 'syncing').length,
+    paused: uploadFiles.filter((f) => f.status === 'paused').length,
     completed: uploadFiles.filter((f) => f.status === 'completed').length,
     error: uploadFiles.filter((f) => f.status === 'error').length,
   };
 
   const hasCompleted = stats.completed > 0 || stats.error > 0;
   const hasPending = stats.pending > 0;
+  const hasPaused = stats.paused > 0;
 
   return (
     <div className="bg-white rounded-lg shadow-lg overflow-hidden">
@@ -279,9 +418,18 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
         <div className="flex items-center justify-between">
           <h3 className="text-lg font-semibold text-gray-800">파일 업로드</h3>
           <div className="flex items-center gap-2">
+            {hasPendingSessions && onLoadPendingSessions && (
+              <button
+                onClick={onLoadPendingSessions}
+                className="px-3 py-1 text-sm bg-yellow-100 hover:bg-yellow-200 text-yellow-700 rounded transition-colors"
+              >
+                미완료 업로드 불러오기
+              </button>
+            )}
             {stats.total > 0 && (
               <span className="text-sm text-gray-500">
                 {stats.completed}/{stats.total} 완료
+                {stats.paused > 0 && ` (${stats.paused}개 일시정지)`}
               </span>
             )}
           </div>
@@ -342,6 +490,9 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
                 uploadFile={uploadFile}
                 onRemove={() => onRemoveFile(uploadFile.id)}
                 onCancel={() => onCancelFile(uploadFile.id)}
+                onPause={onPauseFile ? () => onPauseFile(uploadFile.id) : undefined}
+                onResume={onResumeFile ? (file?: File) => onResumeFile(uploadFile.id, file) : undefined}
+                needsFileForResume={!uploadFile.file}
               />
             ))}
           </div>
@@ -367,6 +518,12 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
                 >
                   전체 취소
                 </button>
+              )}
+              
+              {hasPaused && !isUploading && (
+                <span className="text-sm text-yellow-600">
+                  {stats.paused}개 일시정지됨 - 개별 재개 버튼을 클릭하세요
+                </span>
               )}
               
               {hasPending && !isUploading && (
