@@ -329,6 +329,16 @@ export interface MoveFolderResponse {
   updatedAt: string;
 }
 
+/**
+ * 폴더 삭제(휴지통 이동) 응답
+ */
+export interface DeleteFolderResponse {
+  id: string;
+  name: string;
+  state: FolderState;
+  trashedAt: string;
+}
+
 // ============================================
 // 220.휴지통 (Trash)
 // ============================================

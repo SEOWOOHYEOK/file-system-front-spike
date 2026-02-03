@@ -13,6 +13,7 @@ import type {
   RenameFolderResponse,
   MoveFolderRequest,
   MoveFolderResponse,
+  DeleteFolderResponse,
   FileApiLogEntry,
   SearchQuery,
   SearchResponse,
@@ -153,6 +154,13 @@ export const folderApi = {
     request: MoveFolderRequest
   ): Promise<MoveFolderResponse> =>
     apiCall<MoveFolderResponse>('POST', `/folders/${folderId}/move`, token, request),
+
+  /**
+   * 폴더 삭제 (휴지통으로 이동)
+   * DELETE /v1/folders/:folderId
+   */
+  delete: (token: string, folderId: string): Promise<DeleteFolderResponse> =>
+    apiCall<DeleteFolderResponse>('DELETE', `/folders/${folderId}`, token),
 
   /**
    * 파일/폴더 검색

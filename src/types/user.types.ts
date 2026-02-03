@@ -158,6 +158,75 @@ export interface RolesResponse {
 }
 
 // ============================================
+// 310.즐겨찾기 (Favorite)
+// ============================================
+
+/**
+ * 즐겨찾기 대상 타입
+ */
+export type FavoriteTargetType = 'FILE' | 'FOLDER';
+
+/**
+ * 즐겨찾기 등록 요청
+ */
+export interface AddFavoriteRequest {
+  targetType: FavoriteTargetType;
+  targetId: string;
+}
+
+/**
+ * 즐겨찾기 응답
+ */
+export interface FavoriteResponse {
+  id: string;
+  targetType: FavoriteTargetType;
+  targetId: string;
+  createdAt: string;
+}
+
+/**
+ * 즐겨찾기 목록 조회 쿼리
+ */
+export interface GetFavoritesQuery {
+  type?: FavoriteTargetType;
+}
+
+// ============================================
+// 310.최근 활동 (Recent Activities)
+// ============================================
+
+/**
+ * 최근 활동 조회 쿼리
+ */
+export interface RecentActivitiesQuery {
+  limit?: number;
+  actions?: string;
+}
+
+/**
+ * 활동 아이템
+ */
+export interface ActivityItem {
+  action: string;
+  actionCategory: string;
+  targetType: string;
+  targetId: string;
+  targetName: string;
+  targetPath?: string;
+  result: string;
+  createdAt: string;
+}
+
+/**
+ * 최근 활동 응답
+ */
+export interface RecentActivitiesResponse {
+  userId: string;
+  activities: ActivityItem[];
+  total: number;
+}
+
+// ============================================
 // API 로그 타입
 // ============================================
 

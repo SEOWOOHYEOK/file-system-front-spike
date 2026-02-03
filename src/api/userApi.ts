@@ -11,6 +11,12 @@ import type {
   AssignRoleRequest,
   SyncResult,
   UserApiLogEntry,
+  AddFavoriteRequest,
+  FavoriteResponse,
+  FavoriteTargetType,
+  GetFavoritesQuery,
+  RecentActivitiesQuery,
+  RecentActivitiesResponse,
 } from '../types/user.types';
 
 const api = axios.create({
@@ -133,6 +139,57 @@ export const userApi = {
    */
   sync: (token: string): Promise<SyncResult> =>
     apiCall<SyncResult>('POST', '/users/sync', token),
+
+  // ============================================
+  // 310.즐겨찾기 API
+  // ============================================
+
+  /**
+   * 즐겨찾기 등록
+   * POST /v1/users/favorites
+   */
+  addFavorite: (token: string, request: AddFavoriteRequest): Promise<FavoriteResponse> =>
+    apiCall<FavoriteResponse>('POST', '/users/favorites', token, request),
+
+  /**
+   * 즐겨찾기 해제
+   * DELETE /v1/users/favorites/:targetType/:targetId
+   */
+  removeFavorite: (
+    token: string,
+    targetType: FavoriteTargetType,
+    targetId: string
+  ): Promise<{ message: string }> =>
+    apiCall<{ message: string }>('DELETE', `/users/favorites/${targetType}/${targetId}`, token),
+
+  /**
+   * 즐겨찾기 목록 조회
+   * GET /v1/users/favorites
+   */
+  getFavorites: (token: string, query?: GetFavoritesQuery): Promise<FavoriteResponse[]> =>
+    apiCall<FavoriteResponse[]>(
+      'GET',
+      '/users/favorites',
+      token,
+      undefined,
+      query as Record<string, unknown>
+    ),
+
+  /**
+   * 최근 활동 조회
+   * GET /v1/users/favorites/recent-activities
+   */
+  getRecentActivities: (
+    token: string,
+    query?: RecentActivitiesQuery
+  ): Promise<RecentActivitiesResponse> =>
+    apiCall<RecentActivitiesResponse>(
+      'GET',
+      '/users/favorites/recent-activities',
+      token,
+      undefined,
+      query as Record<string, unknown>
+    ),
 };
 
 export default userApi;

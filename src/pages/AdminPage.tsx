@@ -35,10 +35,13 @@ import type {
   UserWithEmployee,
   Role,
   SyncResult,
+  FavoriteResponse,
+  FavoriteTargetType,
+  RecentActivitiesResponse,
 } from '../types/user.types';
 import type { ApiLogEntry } from '../types/api.types';
 
-type TabType = 'system' | 'file' | 'upload' | 'trash' | 'user' | 'role';
+type TabType = 'system' | 'file' | 'upload' | 'trash' | 'user' | 'role' | 'favorite';
 
 // 모달 타입
 type ModalType = 
@@ -83,6 +86,17 @@ export function AdminPage() {
   const [selectedFile, setSelectedFile] = useState<FileListItemInFolder | null>(null);
   const [targetFolderId, setTargetFolderId] = useState('');
 
+  // 이동 모달용 폴더 트리 상태
+  interface FolderTreeNode {
+    id: string;
+    name: string;
+    children: FolderTreeNode[] | null; // null = 아직 로드 안됨, [] = 하위 폴더 없음
+    isExpanded: boolean;
+    isLoading: boolean;
+  }
+  const [folderTree, setFolderTree] = useState<FolderTreeNode | null>(null);
+  const [folderTreeLoading, setFolderTreeLoading] = useState(false);
+
   // ============================================
   // 500.관리자 (System) 상태
   // ============================================
@@ -121,6 +135,13 @@ export function AdminPage() {
   // ============================================
   const [roles, setRoles] = useState<Role[]>([]);
 
+  // ============================================
+  // 310.즐겨찾기 상태
+  // ============================================
+  const [favorites, setFavorites] = useState<FavoriteResponse[]>([]);
+  const [favoriteFilter, setFavoriteFilter] = useState<FavoriteTargetType | 'ALL'>('ALL');
+  const [recentActivities, setRecentActivities] = useState<RecentActivitiesResponse | null>(null);
+
   // 로딩 상태
   const [loading, setLoading] = useState({
     cache: false,
@@ -135,6 +156,8 @@ export function AdminPage() {
     upload: false,
     action: false,
     search: false,
+    favorites: false,
+    activities: false,
   });
 
   // 미완료 세션 존재 여부
@@ -336,6 +359,128 @@ export function AdminPage() {
   }, [auth.token, navigateToFolder, clearSearch]);
 
   // ============================================
+  // 이동 모달용 폴더 브라우저
+  // ============================================
+  // 폴더 트리 초기화 (루트 폴더 로드)
+  const initFolderTree = useCallback(async () => {
+    if (!auth.token) return;
+    setFolderTreeLoading(true);
+    try {
+      const rootFolder = await folderApi.getRoot(auth.token);
+      const contents = await folderApi.getContents(auth.token, rootFolder.id);
+      const rootNode: FolderTreeNode = {
+        id: rootFolder.id,
+        name: 'root',
+        children: contents.folders.map((f) => ({
+          id: f.id,
+          name: f.name,
+          children: null,
+          isExpanded: false,
+          isLoading: false,
+        })),
+        isExpanded: true,
+        isLoading: false,
+      };
+      setFolderTree(rootNode);
+      setTargetFolderId(rootFolder.id);
+    } catch (error) {
+      console.error('Failed to init folder tree:', error);
+    } finally {
+      setFolderTreeLoading(false);
+    }
+  }, [auth.token]);
+
+  // 트리에서 특정 노드 찾기 (재귀)
+  const findNodeInTree = useCallback((node: FolderTreeNode, targetId: string): FolderTreeNode | null => {
+    if (node.id === targetId) return node;
+    if (node.children) {
+      for (const child of node.children) {
+        const found = findNodeInTree(child, targetId);
+        if (found) return found;
+      }
+    }
+    return null;
+  }, []);
+
+  // 트리 노드 업데이트 (재귀적으로 특정 노드 수정)
+  const updateNodeInTree = useCallback((
+    node: FolderTreeNode,
+    targetId: string,
+    updater: (n: FolderTreeNode) => FolderTreeNode
+  ): FolderTreeNode => {
+    if (node.id === targetId) {
+      return updater(node);
+    }
+    if (node.children) {
+      return {
+        ...node,
+        children: node.children.map((child) => updateNodeInTree(child, targetId, updater)),
+      };
+    }
+    return node;
+  }, []);
+
+  // 폴더 확장/축소 토글
+  const toggleFolderExpand = useCallback(async (folderId: string) => {
+    if (!auth.token || !folderTree) return;
+
+    const targetNode = findNodeInTree(folderTree, folderId);
+    if (!targetNode) return;
+
+    // 이미 확장된 경우 축소
+    if (targetNode.isExpanded) {
+      setFolderTree((prev) =>
+        prev ? updateNodeInTree(prev, folderId, (n) => ({ ...n, isExpanded: false })) : null
+      );
+      return;
+    }
+
+    // 자식이 아직 로드되지 않은 경우 로드
+    if (targetNode.children === null) {
+      setFolderTree((prev) =>
+        prev ? updateNodeInTree(prev, folderId, (n) => ({ ...n, isLoading: true })) : null
+      );
+
+      try {
+        const contents = await folderApi.getContents(auth.token, folderId);
+        const childNodes: FolderTreeNode[] = contents.folders.map((f) => ({
+          id: f.id,
+          name: f.name,
+          children: null,
+          isExpanded: false,
+          isLoading: false,
+        }));
+
+        setFolderTree((prev) =>
+          prev
+            ? updateNodeInTree(prev, folderId, (n) => ({
+                ...n,
+                children: childNodes,
+                isExpanded: true,
+                isLoading: false,
+              }))
+            : null
+        );
+      } catch (error) {
+        console.error('Failed to load folder children:', error);
+        setFolderTree((prev) =>
+          prev ? updateNodeInTree(prev, folderId, (n) => ({ ...n, isLoading: false })) : null
+        );
+      }
+    } else {
+      // 자식이 이미 로드된 경우 바로 확장
+      setFolderTree((prev) =>
+        prev ? updateNodeInTree(prev, folderId, (n) => ({ ...n, isExpanded: true })) : null
+      );
+    }
+  }, [auth.token, folderTree, findNodeInTree, updateNodeInTree]);
+
+  // 폴더 선택
+  const selectTargetFolder = useCallback((folderId: string) => {
+    setTargetFolderId(folderId);
+  }, []);
+
+  // ============================================
   // 200.파일 API 호출
   // ============================================
   const handleFileUpload = useCallback(async (files: FileList) => {
@@ -489,6 +634,29 @@ export function AdminPage() {
     }
   }, [auth.token, selectedFolder, targetFolderId, refreshCurrentFolder]);
 
+  const handleFolderDelete = useCallback(async (folderId: string, folderName: string) => {
+    if (!auth.token) return;
+    if (!confirm(`"${folderName}" 폴더를 휴지통으로 이동하시겠습니까?`)) return;
+    setLoading((prev) => ({ ...prev, action: true }));
+    try {
+      await folderApi.delete(auth.token, folderId);
+      await refreshCurrentFolder();
+    } catch (error) {
+      console.error('Failed to delete folder:', error);
+      // 서버 에러 메시지 추출
+      let errorMessage = '폴더 삭제에 실패했습니다.';
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { data?: { message?: string; code?: string } } };
+        if (axiosError.response?.data?.message) {
+          errorMessage = axiosError.response.data.message;
+        }
+      }
+      alert(errorMessage);
+    } finally {
+      setLoading((prev) => ({ ...prev, action: false }));
+    }
+  }, [auth.token, refreshCurrentFolder]);
+
   // ============================================
   // 220.휴지통 API 호출
   // ============================================
@@ -537,6 +705,28 @@ export function AdminPage() {
     }
   }, [auth.token]);
 
+  const handleRestoreExecute = useCallback(async (trashMetadataId: string, fileName: string) => {
+    if (!auth.token) return;
+    if (!confirm(`"${fileName}" 파일을 복원하시겠습니까?`)) return;
+    try {
+      const result = await trashApi.executeRestore(auth.token, {
+        items: [{ trashMetadataId }],
+      });
+      if (result.queued > 0) {
+        alert(`복원 요청 성공: ${result.queued}개 파일이 복원 대기열에 추가되었습니다.`);
+      } else if (result.skipped > 0) {
+        const skippedInfo = result.skippedItems.map(
+          (item) => `${item.fileName}: ${item.reason === 'CONFLICT' ? '충돌' : '경로 없음'}`
+        ).join('\n');
+        alert(`복원 실패:\n${skippedInfo}`);
+      }
+      await fetchTrashList();
+    } catch (error) {
+      console.error('Failed to execute restore:', error);
+      alert('복원 실행에 실패했습니다.');
+    }
+  }, [auth.token, fetchTrashList]);
+
   // ============================================
   // 300.사용자 API 호출
   // ============================================
@@ -583,6 +773,73 @@ export function AdminPage() {
     }
   }, [auth.token]);
 
+  // ============================================
+  // 310.즐겨찾기 API 호출
+  // ============================================
+  const fetchFavorites = useCallback(async () => {
+    if (!auth.token) return;
+    setLoading((prev) => ({ ...prev, favorites: true }));
+    try {
+      const query = favoriteFilter !== 'ALL' ? { type: favoriteFilter } : undefined;
+      const response = await userApi.getFavorites(auth.token, query);
+      setFavorites(response);
+    } catch (error) {
+      console.error('Failed to fetch favorites:', error);
+    } finally {
+      setLoading((prev) => ({ ...prev, favorites: false }));
+    }
+  }, [auth.token, favoriteFilter]);
+
+  const handleAddFavorite = useCallback(async (targetType: FavoriteTargetType, targetId: string) => {
+    if (!auth.token) return;
+    setLoading((prev) => ({ ...prev, action: true }));
+    try {
+      await userApi.addFavorite(auth.token, { targetType, targetId });
+      await fetchFavorites();
+      alert('즐겨찾기에 추가되었습니다.');
+    } catch (error) {
+      console.error('Failed to add favorite:', error);
+      let errorMessage = '즐겨찾기 추가에 실패했습니다.';
+      if (error && typeof error === 'object' && 'response' in error) {
+        const axiosError = error as { response?: { data?: { message?: string } } };
+        if (axiosError.response?.data?.message) {
+          errorMessage = axiosError.response.data.message;
+        }
+      }
+      alert(errorMessage);
+    } finally {
+      setLoading((prev) => ({ ...prev, action: false }));
+    }
+  }, [auth.token, fetchFavorites]);
+
+  const handleRemoveFavorite = useCallback(async (targetType: FavoriteTargetType, targetId: string) => {
+    if (!auth.token) return;
+    if (!confirm('즐겨찾기에서 제거하시겠습니까?')) return;
+    setLoading((prev) => ({ ...prev, action: true }));
+    try {
+      await userApi.removeFavorite(auth.token, targetType, targetId);
+      await fetchFavorites();
+    } catch (error) {
+      console.error('Failed to remove favorite:', error);
+      alert('즐겨찾기 제거에 실패했습니다.');
+    } finally {
+      setLoading((prev) => ({ ...prev, action: false }));
+    }
+  }, [auth.token, fetchFavorites]);
+
+  const fetchRecentActivities = useCallback(async (limit?: number) => {
+    if (!auth.token) return;
+    setLoading((prev) => ({ ...prev, activities: true }));
+    try {
+      const response = await userApi.getRecentActivities(auth.token, { limit: limit || 20 });
+      setRecentActivities(response);
+    } catch (error) {
+      console.error('Failed to fetch recent activities:', error);
+    } finally {
+      setLoading((prev) => ({ ...prev, activities: false }));
+    }
+  }, [auth.token]);
+
   // 바이트를 GB로 변환
   const formatBytes = (bytes?: number) => {
     if (bytes === undefined) return '-';
@@ -599,6 +856,8 @@ export function AdminPage() {
     setSelectedFolder(null);
     setSelectedFile(null);
     setTargetFolderId('');
+    // 폴더 트리 상태 초기화
+    setFolderTree(null);
   };
 
   if (!auth.isAuthenticated) {
@@ -642,6 +901,7 @@ export function AdminPage() {
         {renderTabButton('trash', '220.휴지통')}
         {renderTabButton('user', '300.사용자')}
         {renderTabButton('role', '310.역할')}
+        {renderTabButton('favorite', '310.즐겨찾기')}
       </div>
 
       <div className="grid grid-cols-12 gap-4">
@@ -1018,6 +1278,20 @@ export function AdminPage() {
                         >
                           이동
                         </button>
+                        <button
+                          onClick={() => handleFolderDelete(folder.id, folder.name)}
+                          className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
+                          title="삭제"
+                        >
+                          삭제
+                        </button>
+                        <button
+                          onClick={() => handleAddFavorite('FOLDER', folder.id)}
+                          className="px-2 py-1 text-xs bg-orange-100 hover:bg-orange-200 rounded"
+                          title="즐겨찾기"
+                        >
+                          ⭐
+                        </button>
                       </div>
                     </div>
                   ))}
@@ -1075,6 +1349,13 @@ export function AdminPage() {
                           title="삭제"
                         >
                           삭제
+                        </button>
+                        <button
+                          onClick={() => handleAddFavorite('FILE', file.id)}
+                          className="px-2 py-1 text-xs bg-orange-100 hover:bg-orange-200 rounded"
+                          title="즐겨찾기"
+                        >
+                          ⭐
                         </button>
                       </div>
                     </div>
@@ -1233,15 +1514,21 @@ export function AdminPage() {
                                 <div className="flex space-x-1">
                                   <button
                                     onClick={() => handleRestorePreview([item.trashMetadataId])}
+                                    className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
+                                  >
+                                    미리보기
+                                  </button>
+                                  <button
+                                    onClick={() => handleRestoreExecute(item.trashMetadataId, item.name)}
                                     className="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 rounded"
                                   >
-                                    복원 미리보기
+                                    복원
                                   </button>
                                   <button
                                     onClick={() => handlePurgeFile(item.trashMetadataId, item.name)}
                                     className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
                                   >
-                                    영구삭제
+                                    삭제
                                   </button>
                                 </div>
                               </td>
@@ -1382,6 +1669,169 @@ export function AdminPage() {
               )}
             </div>
           )}
+
+          {/* 310.즐겨찾기 탭 */}
+          {activeTab === 'favorite' && (
+            <div className="space-y-4">
+              {/* 즐겨찾기 목록 */}
+              <div className="bg-white rounded-lg shadow-sm p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-medium text-gray-900">즐겨찾기 목록</h3>
+                  <div className="flex items-center space-x-2">
+                    <select
+                      value={favoriteFilter}
+                      onChange={(e) => setFavoriteFilter(e.target.value as FavoriteTargetType | 'ALL')}
+                      className="text-sm border rounded px-2 py-1"
+                    >
+                      <option value="ALL">전체</option>
+                      <option value="FILE">파일</option>
+                      <option value="FOLDER">폴더</option>
+                    </select>
+                    <button
+                      onClick={fetchFavorites}
+                      disabled={loading.favorites}
+                      className="text-sm text-blue-500 hover:text-blue-600 disabled:opacity-50"
+                    >
+                      {loading.favorites ? '조회 중...' : '조회'}
+                    </button>
+                  </div>
+                </div>
+
+                {favorites.length > 0 ? (
+                  <div className="space-y-2">
+                    {favorites.map((fav) => (
+                      <div
+                        key={fav.id}
+                        className="flex items-center justify-between p-3 border rounded hover:bg-gray-50"
+                      >
+                        <div className="flex items-center space-x-3">
+                          <span className={fav.targetType === 'FOLDER' ? 'text-yellow-500' : 'text-blue-500'}>
+                            {fav.targetType === 'FOLDER' ? '📁' : '📄'}
+                          </span>
+                          <div>
+                            <div className="font-medium text-sm">
+                              {fav.targetType === 'FOLDER' ? '폴더' : '파일'}
+                            </div>
+                            <div className="text-xs text-gray-500">
+                              ID: {fav.targetId.slice(0, 12)}...
+                            </div>
+                            <div className="text-xs text-gray-400">
+                              추가일: {new Date(fav.createdAt).toLocaleDateString()}
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleRemoveFavorite(fav.targetType, fav.targetId)}
+                          className="px-3 py-1 text-xs bg-red-100 hover:bg-red-200 text-red-700 rounded"
+                        >
+                          해제
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    즐겨찾기 목록이 비어있습니다. 조회 버튼을 클릭하세요.
+                  </p>
+                )}
+              </div>
+
+              {/* 최근 활동 */}
+              <div className="bg-white rounded-lg shadow-sm p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="font-medium text-gray-900">최근 활동</h3>
+                  <button
+                    onClick={() => fetchRecentActivities(30)}
+                    disabled={loading.activities}
+                    className="text-sm text-blue-500 hover:text-blue-600 disabled:opacity-50"
+                  >
+                    {loading.activities ? '조회 중...' : '조회'}
+                  </button>
+                </div>
+
+                {recentActivities ? (
+                  <>
+                    <div className="text-sm text-gray-500 mb-3">
+                      총 {recentActivities.total}개의 활동
+                    </div>
+                    {recentActivities.activities.length > 0 ? (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-sm">
+                          <thead>
+                            <tr className="border-b">
+                              <th className="text-left py-2 px-2">액션</th>
+                              <th className="text-left py-2 px-2">대상</th>
+                              <th className="text-left py-2 px-2">경로</th>
+                              <th className="text-left py-2 px-2">결과</th>
+                              <th className="text-left py-2 px-2">일시</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {recentActivities.activities.map((activity, idx) => (
+                              <tr key={idx} className="border-b hover:bg-gray-50">
+                                <td className="py-2 px-2">
+                                  <span className={`px-2 py-0.5 rounded text-xs ${
+                                    activity.actionCategory === 'CREATE' ? 'bg-green-100 text-green-800' :
+                                    activity.actionCategory === 'DELETE' ? 'bg-red-100 text-red-800' :
+                                    activity.actionCategory === 'UPDATE' ? 'bg-yellow-100 text-yellow-800' :
+                                    activity.actionCategory === 'READ' ? 'bg-blue-100 text-blue-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {activity.action}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2">
+                                  <div className="flex items-center space-x-1">
+                                    <span className={activity.targetType === 'FOLDER' ? 'text-yellow-500' : 'text-blue-500'}>
+                                      {activity.targetType === 'FOLDER' ? '📁' : activity.targetType === 'FILE' ? '📄' : '📋'}
+                                    </span>
+                                    <span className="truncate max-w-[150px]" title={activity.targetName}>
+                                      {activity.targetName || activity.targetId.slice(0, 8)}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td className="py-2 px-2">
+                                  <span className="text-xs text-gray-500 truncate max-w-[150px] block" title={activity.targetPath}>
+                                    {activity.targetPath || '-'}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2">
+                                  <span className={`px-2 py-0.5 rounded text-xs ${
+                                    activity.result === 'SUCCESS' ? 'bg-green-100 text-green-800' :
+                                    activity.result === 'FAILURE' ? 'bg-red-100 text-red-800' :
+                                    'bg-gray-100 text-gray-800'
+                                  }`}>
+                                    {activity.result}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2 text-xs text-gray-500">
+                                  {new Date(activity.createdAt).toLocaleString()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 text-center py-4">활동 내역이 없습니다</p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-400 text-center py-4">조회 버튼을 클릭하세요</p>
+                )}
+              </div>
+
+              {/* 안내 */}
+              <div className="bg-blue-50 rounded-lg p-4 text-sm text-blue-800">
+                <h4 className="font-medium mb-2">즐겨찾기 사용 안내</h4>
+                <ul className="list-disc list-inside space-y-1 text-blue-700">
+                  <li>파일/폴더 탭에서 파일이나 폴더를 즐겨찾기에 추가할 수 있습니다.</li>
+                  <li>즐겨찾기 목록에서 해제 버튼을 클릭하여 제거할 수 있습니다.</li>
+                  <li>최근 활동에서 파일 관련 작업 히스토리를 확인할 수 있습니다.</li>
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right: API Log */}
@@ -1461,18 +1911,109 @@ export function AdminPage() {
             {modalType === 'moveFolder' && selectedFolder && (
               <>
                 <h3 className="text-lg font-semibold mb-4">폴더 이동</h3>
-                <p className="text-sm text-gray-500 mb-2">이동할 폴더: {selectedFolder.name}</p>
-                <input
-                  type="text"
-                  value={targetFolderId}
-                  onChange={(e) => setTargetFolderId(e.target.value)}
-                  placeholder="대상 폴더 ID"
-                  className="w-full border rounded px-3 py-2 mb-4"
-                  autoFocus
-                />
-                <p className="text-xs text-gray-400 mb-4">
-                  폴더 ID는 폴더 탐색 시 API 로그에서 확인할 수 있습니다.
-                </p>
+                <p className="text-sm text-gray-500 mb-2">이동할 폴더: <span className="font-medium text-gray-700">{selectedFolder.name}</span></p>
+                
+                {/* 폴더 트리 */}
+                <div className="border rounded mb-4">
+                  {/* 불러오기 버튼 */}
+                  {!folderTree && (
+                    <div className="p-4 text-center">
+                      <button
+                        onClick={initFolderTree}
+                        disabled={folderTreeLoading}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded disabled:opacity-50"
+                      >
+                        {folderTreeLoading ? '불러오는 중...' : '폴더 목록 불러오기'}
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* 트리 뷰 */}
+                  {folderTree && (
+                    <div className="max-h-72 overflow-y-auto p-2 font-mono text-sm">
+                      {/* 트리 노드 렌더링 함수 */}
+                      {(function renderTreeNode(node: FolderTreeNode, depth: number = 0, excludeId?: string): React.ReactNode {
+                        // 자기 자신 제외
+                        if (node.id === excludeId) return null;
+                        
+                        const indent = depth * 20;
+                        const hasChildren = node.children && node.children.length > 0;
+                        const isSelected = targetFolderId === node.id;
+                        
+                        return (
+                          <div key={node.id}>
+                            <div
+                              className={`flex items-center py-1 cursor-pointer hover:bg-gray-100 rounded ${
+                                isSelected ? 'bg-blue-100' : ''
+                              }`}
+                              style={{ paddingLeft: `${indent}px` }}
+                            >
+                              {/* 확장/축소 버튼 */}
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (node.children === null || (node.children && node.children.filter(c => c.id !== excludeId).length > 0)) {
+                                    toggleFolderExpand(node.id);
+                                  }
+                                }}
+                                className="w-5 text-center text-gray-600 select-none"
+                              >
+                                {node.isLoading ? (
+                                  <span className="text-xs">...</span>
+                                ) : node.children === null ? (
+                                  <span className="text-gray-400">+</span>
+                                ) : hasChildren && node.children.filter(c => c.id !== excludeId).length > 0 ? (
+                                  node.isExpanded ? '-' : '+'
+                                ) : (
+                                  <span className="text-gray-300">·</span>
+                                )}
+                              </span>
+                              
+                              {/* 폴더 아이콘 및 이름 */}
+                              <span
+                                onClick={() => selectTargetFolder(node.id)}
+                                className="flex items-center flex-1"
+                              >
+                                <span className="mr-1">📁</span>
+                                <span className={isSelected ? 'font-bold text-blue-600' : ''}>
+                                  {node.name}
+                                </span>
+                              </span>
+                            </div>
+                            
+                            {/* 자식 노드 렌더링 */}
+                            {node.isExpanded && node.children && (
+                              <div>
+                                {node.children
+                                  .filter(child => child.id !== excludeId)
+                                  .map(child => renderTreeNode(child, depth + 1, excludeId))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })(folderTree, 0, selectedFolder.id)}
+                    </div>
+                  )}
+                </div>
+                
+                {/* 선택된 대상 폴더 표시 */}
+                {targetFolderId && folderTree && (
+                  <p className="text-sm text-blue-600 mb-4">
+                    선택된 폴더: <span className="font-bold">
+                      {(function findName(node: FolderTreeNode): string {
+                        if (node.id === targetFolderId) return node.name;
+                        if (node.children) {
+                          for (const child of node.children) {
+                            const found = findName(child);
+                            if (found) return found;
+                          }
+                        }
+                        return '';
+                      })(folderTree)}
+                    </span>
+                  </p>
+                )}
+                
                 <div className="flex justify-end space-x-2">
                   <button
                     onClick={closeModal}
@@ -1526,18 +2067,104 @@ export function AdminPage() {
             {modalType === 'moveFile' && selectedFile && (
               <>
                 <h3 className="text-lg font-semibold mb-4">파일 이동</h3>
-                <p className="text-sm text-gray-500 mb-2">이동할 파일: {selectedFile.name}</p>
-                <input
-                  type="text"
-                  value={targetFolderId}
-                  onChange={(e) => setTargetFolderId(e.target.value)}
-                  placeholder="대상 폴더 ID"
-                  className="w-full border rounded px-3 py-2 mb-4"
-                  autoFocus
-                />
-                <p className="text-xs text-gray-400 mb-4">
-                  폴더 ID는 폴더 탐색 시 API 로그에서 확인할 수 있습니다.
-                </p>
+                <p className="text-sm text-gray-500 mb-2">이동할 파일: <span className="font-medium text-gray-700">{selectedFile.name}</span></p>
+                
+                {/* 폴더 트리 */}
+                <div className="border rounded mb-4">
+                  {/* 불러오기 버튼 */}
+                  {!folderTree && (
+                    <div className="p-4 text-center">
+                      <button
+                        onClick={initFolderTree}
+                        disabled={folderTreeLoading}
+                        className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded disabled:opacity-50"
+                      >
+                        {folderTreeLoading ? '불러오는 중...' : '폴더 목록 불러오기'}
+                      </button>
+                    </div>
+                  )}
+                  
+                  {/* 트리 뷰 */}
+                  {folderTree && (
+                    <div className="max-h-72 overflow-y-auto p-2 font-mono text-sm">
+                      {/* 트리 노드 렌더링 함수 */}
+                      {(function renderTreeNode(node: FolderTreeNode, depth: number = 0): React.ReactNode {
+                        const indent = depth * 20;
+                        const hasChildren = node.children && node.children.length > 0;
+                        const isSelected = targetFolderId === node.id;
+                        
+                        return (
+                          <div key={node.id}>
+                            <div
+                              className={`flex items-center py-1 cursor-pointer hover:bg-gray-100 rounded ${
+                                isSelected ? 'bg-blue-100' : ''
+                              }`}
+                              style={{ paddingLeft: `${indent}px` }}
+                            >
+                              {/* 확장/축소 버튼 */}
+                              <span
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (node.children === null || hasChildren) {
+                                    toggleFolderExpand(node.id);
+                                  }
+                                }}
+                                className="w-5 text-center text-gray-600 select-none"
+                              >
+                                {node.isLoading ? (
+                                  <span className="text-xs">...</span>
+                                ) : node.children === null ? (
+                                  <span className="text-gray-400">+</span>
+                                ) : hasChildren ? (
+                                  node.isExpanded ? '-' : '+'
+                                ) : (
+                                  <span className="text-gray-300">·</span>
+                                )}
+                              </span>
+                              
+                              {/* 폴더 아이콘 및 이름 */}
+                              <span
+                                onClick={() => selectTargetFolder(node.id)}
+                                className="flex items-center flex-1"
+                              >
+                                <span className="mr-1">📁</span>
+                                <span className={isSelected ? 'font-bold text-blue-600' : ''}>
+                                  {node.name}
+                                </span>
+                              </span>
+                            </div>
+                            
+                            {/* 자식 노드 렌더링 */}
+                            {node.isExpanded && node.children && (
+                              <div>
+                                {node.children.map(child => renderTreeNode(child, depth + 1))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })(folderTree, 0)}
+                    </div>
+                  )}
+                </div>
+                
+                {/* 선택된 대상 폴더 표시 */}
+                {targetFolderId && folderTree && (
+                  <p className="text-sm text-blue-600 mb-4">
+                    선택된 폴더: <span className="font-bold">
+                      {(function findName(node: FolderTreeNode): string {
+                        if (node.id === targetFolderId) return node.name;
+                        if (node.children) {
+                          for (const child of node.children) {
+                            const found = findName(child);
+                            if (found) return found;
+                          }
+                        }
+                        return '';
+                      })(folderTree)}
+                    </span>
+                  </p>
+                )}
+                
                 <div className="flex justify-end space-x-2">
                   <button
                     onClick={closeModal}
