@@ -5,6 +5,7 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { Layout } from './components/common/Layout';
 import { HomePage } from './pages/HomePage';
+import { MyFilesPage } from './pages/MyFilesPage';
 import { AdminPage } from './pages/AdminPage';
 import { AdminSharePage } from './pages/AdminSharePage';
 import { AdminExternalUserPage } from './pages/AdminExternalUserPage';
@@ -17,6 +18,7 @@ function App() {
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
+          <Route path="my-files" element={<MyFilesPage />} />
           <Route path="admin" element={<AdminPage />} />
           <Route path="admin/shares" element={<AdminSharePage />} />
           <Route path="admin/external-users" element={<AdminExternalUserPage />} />

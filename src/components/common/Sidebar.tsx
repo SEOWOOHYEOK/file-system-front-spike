@@ -10,6 +10,11 @@ const navItems = [
     icon: '🏠',
   },
   {
+    title: '내 파일',
+    path: '/my-files',
+    icon: '📁',
+  },
+  {
     title: '500.관리자',
     path: '/admin',
     icon: '⚙️',

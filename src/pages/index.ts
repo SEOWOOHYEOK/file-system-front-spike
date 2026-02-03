@@ -1,4 +1,5 @@
 export { HomePage } from './HomePage';
+export { MyFilesPage } from './MyFilesPage';
 export { AdminPage } from './AdminPage';
 export { AdminSharePage } from './AdminSharePage';
 export { AdminExternalUserPage } from './AdminExternalUserPage';
