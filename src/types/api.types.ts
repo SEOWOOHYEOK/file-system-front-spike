@@ -89,6 +89,60 @@ export interface ShareDetailResponse {
 }
 
 // ============================================================
+// 711.외부접근 다운로드 (External Share Download with Range)
+// ============================================================
+
+/**
+ * Range 다운로드 옵션 (외부 공유용)
+ */
+export interface ExtRangeDownloadOptions {
+  /** 시작 바이트 */
+  start?: number;
+  /** 끝 바이트 */
+  end?: number;
+  /** ETag for safe resume (If-Range 헤더) */
+  ifRange?: string;
+}
+
+/**
+ * Content-Range 정보
+ */
+export interface ExtContentRange {
+  start: number;
+  end: number;
+  total: number;
+}
+
+/**
+ * 외부 공유 다운로드 응답 (메타데이터 포함)
+ */
+export interface ExtDownloadResponse {
+  blob: Blob;
+  filename: string;
+  /** ETag 헤더 값 */
+  etag?: string;
+  /** X-Checksum-SHA256 헤더 값 */
+  checksum?: string;
+  /** 전체 파일 크기 */
+  totalSize: number;
+  /** 206 Partial Content 여부 */
+  isPartial: boolean;
+  /** Content-Range 정보 (부분 응답시) */
+  contentRange?: ExtContentRange;
+}
+
+/**
+ * 외부 공유 다운로드 진행 상태 (이어받기용)
+ */
+export interface ExtDownloadProgress {
+  shareId: string;
+  etag: string;
+  totalSize: number;
+  downloadedSize: number;
+  chunks: Blob[];
+}
+
+// ============================================================
 // API Log Types (테스트 러너용)
 // ============================================================
 

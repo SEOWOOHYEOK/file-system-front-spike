@@ -7,12 +7,14 @@ import { useState, useCallback, useRef } from 'react';
 import { fileApi } from '../api/fileApi';
 import type {
   ConflictStrategy,
+  SyncProgressInfo,
+  SyncProgressStatus,
 } from '../types/file.types';
 
 /**
  * 업로드 파일 상태
  */
-export type UploadFileStatus = 
+export type UploadFileStatus =
   | 'pending'      // 대기 중
   | 'uploading'    // 업로드 중
   | 'paused'       // 일시정지
@@ -30,6 +32,12 @@ export interface UploadFile {
   status: UploadFileStatus;
   uploadProgress: number;  // 업로드 진행률 (0-100)
   syncProgress: number;    // NAS 동기화 진행률 (0-100)
+  /** 동기화 상세 진행률 정보 */
+  syncProgressInfo?: SyncProgressInfo;
+  /** 동기화 상태 (상세) */
+  syncStatus?: SyncProgressStatus;
+  /** 동기화 상태 메시지 */
+  syncMessage?: string;
   sessionId?: string;
   fileId?: string;
   syncEventId?: string;
@@ -179,7 +187,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   }, []);
 
   /**
-   * 동기화 상태 폴링 시작
+   * 동기화 상태 폴링 시작 (상세 진행률)
    */
   const startSyncPolling = useCallback((
     id: string,
@@ -188,23 +196,72 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   ) => {
     const poll = async () => {
       try {
-        const status = await fileApi.getSyncEventStatus(token, syncEventId);
-        
-        updateFileState(id, {
-          syncProgress: status.progress,
-        });
+        // 상세 진행률 API 사용
+        const response = await fileApi.getSyncProgress(token, syncEventId);
 
-        if (status.status === 'DONE') {
-          updateFileState(id, { status: 'completed', syncProgress: 100 });
+
+        // 진행률 정보
+        const syncProgress = response.progress?.percent ?? 0;
+
+        console.log('--------------------------------');
+        console.log('syncEventId', syncEventId);
+        console.log('response progress', response.progress);
+        console.log('response status', response.status);
+        console.log('response syncEventId', response.syncEventId);
+        console.log('response eventType', response.eventType);
+        console.log('--------------------------------');
+
+        // 상태별 처리 (한 번의 updateFileState 호출로 통합)
+        if (response.status === 'QUEUED') {
+          // 대기 중 - 계속 폴링 (syncing 상태 유지)
+          updateFileState(id, {
+            status: 'syncing',
+            syncProgress: 0,
+            syncProgressInfo: response.progress,
+            syncStatus: 'QUEUED',
+            syncMessage: '동기화 대기 중...',
+          });
+        } else if (response.status === 'PROCESSING') {
+          // 처리 중 - 상세 진행률 표시 (syncing 상태 유지)
+          const progressMessage = response.progress?.completedChunks !== undefined && response.progress?.totalChunks !== undefined
+            ? `동기화 중... (${response.progress.completedChunks}/${response.progress.totalChunks} 청크)`
+            : `동기화 중... (${syncProgress}%)`;
+
+          updateFileState(id, {
+            status: 'syncing',
+            syncProgress,
+            syncProgressInfo: response.progress,
+            syncStatus: 'PROCESSING',
+            syncMessage: progressMessage,
+          });
+        } else if (response.status === 'DONE') {
+          updateFileState(id, {
+            status: 'completed',
+            syncProgress: 100,
+            syncStatus: 'DONE',
+          });
           const interval = pollingIntervals.current.get(id);
           if (interval) {
             clearInterval(interval);
             pollingIntervals.current.delete(id);
           }
-        } else if (status.status === 'FAILED') {
+        } else if (response.status === 'FAILED') {
           updateFileState(id, {
             status: 'error',
-            error: status.errorMessage || 'NAS 동기화 실패',
+            error: response.errorMessage || 'NAS 동기화 실패',
+            syncStatus: 'FAILED',
+          });
+          const interval = pollingIntervals.current.get(id);
+          if (interval) {
+            clearInterval(interval);
+            pollingIntervals.current.delete(id);
+          }
+        } else if (response.status === 'IDLE') {
+          // IDLE 상태도 완료로 처리 (동기화 필요 없음)
+          updateFileState(id, {
+            status: 'completed',
+            syncProgress: 100,
+            syncStatus: 'IDLE',
           });
           const interval = pollingIntervals.current.get(id);
           if (interval) {
@@ -214,6 +271,32 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
         }
       } catch (error) {
         console.error('Sync polling error:', error);
+        // 에러 발생 시 기존 API로 폴백
+        try {
+          const status = await fileApi.getSyncEventStatus(token, syncEventId);
+          updateFileState(id, { syncProgress: status.progress });
+
+          if (status.status === 'DONE') {
+            updateFileState(id, { status: 'completed', syncProgress: 100 });
+            const interval = pollingIntervals.current.get(id);
+            if (interval) {
+              clearInterval(interval);
+              pollingIntervals.current.delete(id);
+            }
+          } else if (status.status === 'FAILED') {
+            updateFileState(id, {
+              status: 'error',
+              error: status.errorMessage || 'NAS 동기화 실패',
+            });
+            const interval = pollingIntervals.current.get(id);
+            if (interval) {
+              clearInterval(interval);
+              pollingIntervals.current.delete(id);
+            }
+          }
+        } catch (fallbackError) {
+          console.error('Sync polling fallback error:', fallbackError);
+        }
       }
     };
 
@@ -224,38 +307,6 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
     const interval = setInterval(poll, SYNC_POLL_INTERVAL);
     pollingIntervals.current.set(id, interval);
   }, [updateFileState]);
-
-  /**
-   * 단일 파일 업로드 (일반 업로드)
-   */
-  const uploadSmallFile = useCallback(async (
-    uploadFile: UploadFile,
-    token: string,
-    folderId: string,
-    conflictStrategy?: ConflictStrategy
-  ): Promise<void> => {
-    updateFileState(uploadFile.id, { status: 'uploading' });
-
-    try {
-      const result = await fileApi.upload(token, uploadFile.file, folderId, conflictStrategy);
-      
-      updateFileState(uploadFile.id, {
-        status: 'syncing',
-        uploadProgress: 100,
-        fileId: result.id,
-        syncEventId: result.syncEventId,
-      });
-
-      // 동기화 상태 폴링 시작
-      startSyncPolling(uploadFile.id, result.syncEventId, token);
-    } catch (error) {
-      updateFileState(uploadFile.id, {
-        status: 'error',
-        error: error instanceof Error ? error.message : '업로드 실패',
-      });
-      throw error;
-    }
-  }, [updateFileState, startSyncPolling]);
 
   /**
    * 단일 파일 멀티파트 업로드
@@ -286,7 +337,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
         totalParts = resumeFrom.totalParts;
         uploadedParts = [...resumeFrom.completedParts];
         totalUploaded = uploadedParts.length * partSize;
-        
+
         // 마지막 파트가 부분적일 수 있으므로 정확한 업로드 바이트 계산
         if (uploadedParts.length > 0) {
           const lastCompletedPart = Math.max(...uploadedParts);
@@ -363,11 +414,11 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
         // 일시정지 체크
         if (pauseFlags.current.get(uploadFile.id)) {
           // 일시정지 상태로 변경하고 현재 진행 상황 저장
-          updateFileState(uploadFile.id, { 
+          updateFileState(uploadFile.id, {
             status: 'paused',
             completedParts: [...uploadedParts],
           });
-          
+
           // localStorage 업데이트
           saveSession({
             id: uploadFile.id,
@@ -382,7 +433,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
             createdAt: new Date().toISOString(),
             expiresAt: '', // 서버에서 가져와야 함
           });
-          
+
           return; // 업로드 중단 (에러 throw 안 함)
         }
 
@@ -405,7 +456,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
 
         totalUploaded += chunkBuffer.byteLength;
         uploadedParts.push(partNumber);
-        
+
         updateFileState(uploadFile.id, {
           completedParts: [...uploadedParts],
           uploadProgress: Math.round((totalUploaded / uploadFile.file.size) * 100),
@@ -429,19 +480,22 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
 
       // 업로드 완료
       const completeResponse = await fileApi.multipartComplete(token, sessionId);
-      
+
       // localStorage에서 세션 삭제
       removeStoredSession(sessionId);
-      
+
       updateFileState(uploadFile.id, {
         status: 'syncing',
         uploadProgress: 100,
         fileId: completeResponse.fileId,
         syncEventId: completeResponse.syncEventId,
+        syncMessage: '동기화 준비 중...',
       });
 
-      // 동기화 상태 폴링 시작
-      startSyncPolling(uploadFile.id, completeResponse.syncEventId, token);
+      // 동기화 상태 폴링 시작 (서버 준비 시간 1.5초 대기)
+      setTimeout(() => {
+        startSyncPolling(uploadFile.id, completeResponse.syncEventId, token);
+      }, 1500);
     } catch (error) {
       if (abortControllers.current.get(uploadFile.id)) {
         updateFileState(uploadFile.id, { status: 'cancelled' });
@@ -463,7 +517,61 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   }, [updateFileState, startSyncPolling]);
 
   /**
-   * 업로드 시작
+   * 다중 소용량 파일 업로드 (uploadMany API 사용)
+   */
+  const uploadSmallFilesInBatch = useCallback(async (
+    files: UploadFile[],
+    token: string,
+    folderId: string,
+    conflictStrategy?: ConflictStrategy
+  ): Promise<void> => {
+    if (files.length === 0) return;
+
+    // 모든 파일 상태를 uploading으로 변경
+    files.forEach((f) => {
+      updateFileState(f.id, { status: 'uploading', folderId });
+    });
+
+    try {
+      // uploadMany API 호출
+      const results = await fileApi.uploadMany(
+        token,
+        files.map((f) => f.file),
+        folderId,
+        conflictStrategy
+      );
+
+      // 결과 처리 - 각 파일의 동기화 상태 폴링 시작
+      results.forEach((result, index) => {
+        const uploadFile = files[index];
+        if (uploadFile) {
+          updateFileState(uploadFile.id, {
+            status: 'syncing',
+            uploadProgress: 100,
+            fileId: result.id,
+            syncEventId: result.syncEventId,
+            syncMessage: '동기화 준비 중...',
+          });
+          // 동기화 상태 폴링 시작 (서버 준비 시간 1초 대기)
+          setTimeout(() => {
+            startSyncPolling(uploadFile.id, result.syncEventId, token);
+          }, 1000);
+        }
+      });
+    } catch (error) {
+      // 에러 시 모든 파일 상태를 error로 변경
+      files.forEach((f) => {
+        updateFileState(f.id, {
+          status: 'error',
+          error: error instanceof Error ? error.message : '업로드 실패',
+        });
+      });
+      throw error;
+    }
+  }, [updateFileState, startSyncPolling]);
+
+  /**
+   * 업로드 시작 (병렬 처리)
    */
   const startUpload = useCallback(async (
     token: string,
@@ -474,25 +582,37 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
 
     // pending 상태의 파일만 업로드 시작
     const pendingFiles = uploadFiles.filter((f) => f.status === 'pending');
-    
-    for (const uploadFile of pendingFiles) {
-      // folderId 저장
-      updateFileState(uploadFile.id, { folderId });
-      
-      try {
-        if (uploadFile.file.size >= MULTIPART_MIN_SIZE) {
-          await uploadLargeFile(uploadFile, token, folderId, conflictStrategy);
-        } else {
-          await uploadSmallFile(uploadFile, token, folderId, conflictStrategy);
-        }
-      } catch (error) {
-        console.error(`Failed to upload ${uploadFile.file.name}:`, error);
-        // 에러가 발생해도 다음 파일 업로드 계속
-      }
+
+    // 파일 크기별로 분류
+    const smallFiles = pendingFiles.filter((f) => f.file.size < MULTIPART_MIN_SIZE);
+    const largeFiles = pendingFiles.filter((f) => f.file.size >= MULTIPART_MIN_SIZE);
+
+    // folderId 저장
+    pendingFiles.forEach((f) => {
+      updateFileState(f.id, { folderId });
+    });
+
+    try {
+      // 병렬로 업로드 실행
+      await Promise.all([
+        // 소용량 파일들은 uploadMany로 한번에 업로드
+        smallFiles.length > 0
+          ? uploadSmallFilesInBatch(smallFiles, token, folderId, conflictStrategy)
+          : Promise.resolve(),
+        // 대용량 파일들은 각각 병렬로 멀티파트 업로드
+        ...largeFiles.map((uploadFile) =>
+          uploadLargeFile(uploadFile, token, folderId, conflictStrategy).catch((error) => {
+            console.error(`Failed to upload ${uploadFile.file.name}:`, error);
+            // 개별 파일 에러는 무시하고 계속 진행
+          })
+        ),
+      ]);
+    } catch (error) {
+      console.error('Upload batch failed:', error);
     }
 
     setIsUploading(false);
-  }, [uploadFiles, uploadLargeFile, uploadSmallFile, updateFileState]);
+  }, [uploadFiles, uploadLargeFile, uploadSmallFilesInBatch, updateFileState]);
 
   /**
    * 업로드 취소
@@ -547,7 +667,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   const pauseUpload = useCallback((id: string): void => {
     const uploadFile = uploadFiles.find((f) => f.id === id);
     if (!uploadFile || uploadFile.status !== 'uploading') return;
-    
+
     pauseFlags.current.set(id, true);
   }, [uploadFiles]);
 
@@ -563,7 +683,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
     file?: File
   ): Promise<void> => {
     const uploadFile = uploadFiles.find((f) => f.id === id);
-    
+
     if (!uploadFile) {
       console.error('Upload file not found:', id);
       return;
@@ -591,7 +711,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
     try {
       // 서버에서 현재 세션 상태 조회
       const sessionStatus = await fileApi.multipartStatus(token, uploadFile.sessionId);
-      
+
       if (sessionStatus.status === 'COMPLETED') {
         // 이미 완료된 경우
         updateFileState(id, { status: 'completed', uploadProgress: 100 });
@@ -601,8 +721,8 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
 
       if (sessionStatus.status === 'ABORTED' || sessionStatus.status === 'EXPIRED') {
         // 세션이 만료되거나 취소된 경우 - 새로 시작해야 함
-        updateFileState(id, { 
-          status: 'error', 
+        updateFileState(id, {
+          status: 'error',
           error: `세션이 ${sessionStatus.status === 'EXPIRED' ? '만료' : '취소'}되었습니다. 다시 업로드해주세요.`
         });
         removeStoredSession(uploadFile.sessionId);
@@ -652,7 +772,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
    */
   const loadPendingSessions = useCallback(async (token: string): Promise<void> => {
     const storedSessions = getStoredSessions();
-    
+
     if (storedSessions.length === 0) return;
 
     const validSessions: UploadFile[] = [];
@@ -661,7 +781,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
       try {
         // 서버에서 세션 상태 확인
         const status = await fileApi.multipartStatus(token, session.sessionId);
-        
+
         if (status.status === 'INIT' || status.status === 'UPLOADING') {
           // 유효한 세션 - uploadFiles에 추가 (paused 상태로)
           validSessions.push({

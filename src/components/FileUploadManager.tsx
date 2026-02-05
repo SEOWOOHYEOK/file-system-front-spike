@@ -4,6 +4,7 @@
  */
 import React, { useCallback, useRef } from 'react';
 import type { UploadFile, UploadFileStatus } from '../hooks/useMultipartUpload';
+import type { SyncProgressInfo } from '../types/file.types';
 
 /**
  * 파일 크기 포맷
@@ -59,7 +60,12 @@ function getFileIcon(fileName: string, mimeType: string): { icon: string; color:
 /**
  * 상태별 색상 및 텍스트
  */
-function getStatusInfo(status: UploadFileStatus, uploadProgress: number, _syncProgress: number): {
+function getStatusInfo(
+  status: UploadFileStatus, 
+  uploadProgress: number, 
+  syncProgress: number,
+  syncProgressInfo?: SyncProgressInfo
+): {
   barColor: string;
   text: string;
   textColor: string;
@@ -71,8 +77,13 @@ function getStatusInfo(status: UploadFileStatus, uploadProgress: number, _syncPr
       return { barColor: 'bg-blue-500', text: `${uploadProgress}%`, textColor: 'text-blue-600' };
     case 'paused':
       return { barColor: 'bg-yellow-500', text: `일시정지 (${uploadProgress}%)`, textColor: 'text-yellow-600' };
-    case 'syncing':
-      return { barColor: 'bg-orange-500', text: '동기화 중...', textColor: 'text-orange-600' };
+    case 'syncing': {
+      // 상세 진행률 정보가 있으면 표시
+      const progressText = syncProgressInfo?.percent !== undefined 
+        ? `${syncProgressInfo.percent}%` 
+        : `${syncProgress}%`;
+      return { barColor: 'bg-orange-500', text: `동기화 중 ${progressText}`, textColor: 'text-orange-600' };
+    }
     case 'completed':
       return { barColor: 'bg-green-500', text: '완료', textColor: 'text-green-600' };
     case 'error':
@@ -121,6 +132,32 @@ interface FileItemProps {
 }
 
 /**
+ * 동기화 상세 진행률 표시 컴포넌트
+ */
+const SyncProgressDetail: React.FC<{ info?: SyncProgressInfo; message?: string }> = ({ info, message }) => {
+  if (!info) return null;
+  
+  const hasChunkInfo = info.completedChunks !== undefined && info.totalChunks !== undefined;
+  const hasByteInfo = info.bytesTransferred !== undefined && info.totalBytes !== undefined;
+  
+  return (
+    <div className="text-xs text-orange-500 mt-1 flex items-center gap-2 flex-wrap">
+      {message && <span>{message}</span>}
+      {hasChunkInfo && (
+        <span className="bg-orange-100 px-1.5 py-0.5 rounded">
+          청크: {info.completedChunks}/{info.totalChunks}
+        </span>
+      )}
+      {hasByteInfo && (
+        <span className="bg-orange-100 px-1.5 py-0.5 rounded">
+          {formatFileSize(info.bytesTransferred!)}/{formatFileSize(info.totalBytes!)}
+        </span>
+      )}
+    </div>
+  );
+};
+
+/**
  * 파일 아이템 컴포넌트
  */
 const FileItem: React.FC<FileItemProps> = ({ 
@@ -140,7 +177,8 @@ const FileItem: React.FC<FileItemProps> = ({
   const { barColor, text, textColor } = getStatusInfo(
     uploadFile.status,
     uploadFile.uploadProgress,
-    uploadFile.syncProgress
+    uploadFile.syncProgress,
+    uploadFile.syncProgressInfo
   );
   const progress = calculateProgress(
     uploadFile.status,
@@ -197,6 +235,14 @@ const FileItem: React.FC<FileItemProps> = ({
             style={{ width: `${progress}%` }}
           />
         </div>
+
+        {/* 동기화 상세 진행률 */}
+        {uploadFile.status === 'syncing' && uploadFile.syncProgressInfo && (
+          <SyncProgressDetail 
+            info={uploadFile.syncProgressInfo} 
+            message={uploadFile.syncMessage}
+          />
+        )}
 
         {/* 에러 메시지 */}
         {uploadFile.status === 'error' && uploadFile.error && (

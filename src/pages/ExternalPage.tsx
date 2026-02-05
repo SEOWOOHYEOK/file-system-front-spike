@@ -4,6 +4,7 @@
  */
 import { useState, useCallback, useEffect } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { useExternalDownload } from '../hooks/useExternalDownload';
 import { externalShareApi, setLogCallback } from '../api/externalShareApi';
 import { LoginPanel } from '../components/LoginPanel';
 import { ShareListPanel } from '../components/ShareListPanel';
@@ -11,6 +12,7 @@ import { ShareDetailPanel } from '../components/ShareDetailPanel';
 import { ResultLog } from '../components/ResultLog';
 import { TestRunner, initializeScenarioSteps } from '../components/TestRunner';
 import { FileViewer } from '../components/FileViewer';
+import { FileDownloadManager } from '../components/FileDownloadManager';
 import type { 
   PublicShare, 
   ShareDetailResponse, 
@@ -21,6 +23,15 @@ import type {
 export function ExternalPage() {
   // 인증 상태
   const { auth, login, logout, refresh } = useAuth();
+  
+  // 다운로드 훅
+  const {
+    downloadFiles,
+    startDownload,
+    cancelDownload,
+    clearCompleted: clearCompletedDownloads,
+    isDownloading,
+  } = useExternalDownload();
   
   // 공유 데이터
   const [shares, setShares] = useState<PublicShare[]>([]);
@@ -125,27 +136,42 @@ export function ExternalPage() {
   const handleDownload = async () => {
     if (!auth.accessToken || !selectedShare || !shareDetail) return;
     
-    try {
-      const { blob, filename } = await externalShareApi.downloadFile(
+    // 파일 크기를 알 수 있으면 새로운 다운로드 훅 사용 (진행률 추적, 체크섬 검증)
+    if (selectedShare.fileSize && selectedShare.fileSize > 0) {
+      startDownload(
         auth.accessToken,
         selectedShare.id,
         shareDetail.contentToken,
+        selectedShare.fileName || 'download',
+        selectedShare.fileSize
       );
-      
-      // 다운로드 트리거
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
       
       // 상세 정보 갱신 (카운트 업데이트)
       await handleSelectShare(selectedShare);
-    } catch (error) {
-      console.error('Failed to download file:', error);
+    } else {
+      // 파일 크기를 모르면 기존 방식으로 다운로드
+      try {
+        const { blob, filename } = await externalShareApi.downloadFile(
+          auth.accessToken,
+          selectedShare.id,
+          shareDetail.contentToken,
+        );
+        
+        // 다운로드 트리거
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        // 상세 정보 갱신 (카운트 업데이트)
+        await handleSelectShare(selectedShare);
+      } catch (error) {
+        console.error('Failed to download file:', error);
+      }
     }
   };
 
@@ -334,6 +360,20 @@ export function ExternalPage() {
           </div>
         </div>
       </div>
+
+      {/* Download Manager */}
+      {downloadFiles.length > 0 && (
+        <div className="fixed bottom-4 right-4 w-96 max-h-80 bg-white rounded-lg shadow-xl border border-gray-200 overflow-hidden z-40">
+          <FileDownloadManager
+            downloads={downloadFiles}
+            onPause={() => {}} // 외부 공유는 일시정지 미지원
+            onResume={() => {}} // 외부 공유는 이어받기 미지원
+            onCancel={cancelDownload}
+            onClearCompleted={clearCompletedDownloads}
+            isDownloading={isDownloading}
+          />
+        </div>
+      )}
 
       {/* File Viewer Modal */}
       <FileViewer 

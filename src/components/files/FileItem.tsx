@@ -17,6 +17,67 @@ export function getFileIcon(mimeType: string): string {
   return '📄';
 }
 
+// MIME 타입을 사람이 읽기 쉬운 한글로 변환
+export function formatMimeType(mimeType: string): string {
+  if (!mimeType) return '-';
+  
+  // 이미지
+  if (mimeType.startsWith('image/')) {
+    const subtype = mimeType.split('/')[1]?.toUpperCase();
+    return `이미지 (${subtype})`;
+  }
+  // 비디오
+  if (mimeType.startsWith('video/')) {
+    const subtype = mimeType.split('/')[1]?.toUpperCase();
+    return `비디오 (${subtype})`;
+  }
+  // 오디오
+  if (mimeType.startsWith('audio/')) {
+    const subtype = mimeType.split('/')[1]?.toUpperCase();
+    return `오디오 (${subtype})`;
+  }
+  // PDF
+  if (mimeType.includes('pdf')) return 'PDF 문서';
+  // Word
+  if (mimeType.includes('word') || mimeType.includes('msword') || mimeType.includes('wordprocessingml')) {
+    return 'Word 문서';
+  }
+  // Excel
+  if (mimeType.includes('excel') || mimeType.includes('spreadsheet')) {
+    return 'Excel 스프레드시트';
+  }
+  // PowerPoint
+  if (mimeType.includes('powerpoint') || mimeType.includes('presentation')) {
+    return 'PowerPoint 프레젠테이션';
+  }
+  // 압축 파일
+  if (mimeType.includes('zip')) return 'ZIP 압축파일';
+  if (mimeType.includes('rar')) return 'RAR 압축파일';
+  if (mimeType.includes('tar')) return 'TAR 압축파일';
+  if (mimeType.includes('gzip') || mimeType.includes('gz')) return 'GZIP 압축파일';
+  // 텍스트
+  if (mimeType === 'text/plain') return '텍스트 파일';
+  if (mimeType === 'text/html') return 'HTML 파일';
+  if (mimeType === 'text/css') return 'CSS 파일';
+  if (mimeType === 'text/csv') return 'CSV 파일';
+  if (mimeType.includes('javascript') || mimeType.includes('ecmascript')) return 'JavaScript 파일';
+  if (mimeType.includes('json')) return 'JSON 파일';
+  if (mimeType.includes('xml')) return 'XML 파일';
+  // 기타 텍스트
+  if (mimeType.startsWith('text/')) return '텍스트 파일';
+  // application 타입
+  if (mimeType.startsWith('application/')) {
+    const subtype = mimeType.split('/')[1];
+    if (subtype) {
+      // 일반적인 확장자 기반 타입명 추출
+      const cleanSubtype = subtype.replace(/^x-/, '').replace(/^vnd\./, '').toUpperCase();
+      return `${cleanSubtype} 파일`;
+    }
+  }
+  
+  return mimeType;
+}
+
 // 파일 크기 포맷
 export function formatFileSize(bytes: number): string {
   if (bytes === 0) return '0 B';
@@ -54,7 +115,7 @@ interface FileItemGridProps {
   updatedAt: string;
   isSelected: boolean;
   isFavorite: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
@@ -117,12 +178,14 @@ interface FileItemListProps {
   type: 'file' | 'folder';
   mimeType?: string;
   size?: number;
+  /** 파일 생성자 (업로더) ID */
+  createdBy?: string;
   updatedAt: string;
   folderCount?: number;
   fileCount?: number;
   isSelected: boolean;
   isFavorite: boolean;
-  onClick: () => void;
+  onClick: (e: React.MouseEvent) => void;
   onDoubleClick: () => void;
   onContextMenu: (e: React.MouseEvent) => void;
 }
@@ -132,6 +195,7 @@ export function FileItemList({
   type,
   mimeType,
   size,
+  createdBy,
   updatedAt,
   folderCount,
   fileCount,
@@ -181,9 +245,23 @@ export function FileItemList({
       </td>
       <td className="px-4 py-3 text-sm text-gray-500">
         {type === 'folder' ? (
+          <span className="text-gray-400">폴더</span>
+        ) : (
+          <span title={mimeType}>{formatMimeType(mimeType || '')}</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-sm text-gray-500">
+        {type === 'folder' ? (
           <span>{folderCount}폴더, {fileCount}파일</span>
         ) : (
           formatFileSize(size || 0)
+        )}
+      </td>
+      <td className="px-4 py-3 text-sm text-gray-500">
+        {type === 'folder' ? (
+          <span className="text-gray-400">-</span>
+        ) : (
+          <span title={createdBy}>{createdBy || '-'}</span>
         )}
       </td>
       <td className="px-4 py-3 text-sm text-gray-500">

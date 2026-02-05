@@ -71,6 +71,8 @@ export interface FileInfoResponse {
   mimeType: string;
   state: FileState;
   storageStatus: StorageStatus;
+  /** SHA-256 체크섬 (서버에서 제공 시) */
+  checksum?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -224,6 +226,8 @@ export interface FileListItemInFolder {
     cache: string | null;
     nas: string | null;
   };
+  /** 파일 생성자 (업로더) ID */
+  createdBy?: string;
   updatedAt: string;
 }
 
@@ -756,6 +760,52 @@ export interface SyncEventStatusResponse {
 }
 
 /**
+ * 동기화 진행률 상세 정보
+ */
+export interface SyncProgressInfo {
+  /** 진행률 (0-100) */
+  percent: number;
+  /** 완료된 청크 수 */
+  completedChunks?: number;
+  /** 전체 청크 수 */
+  totalChunks?: number;
+  /** 전송된 바이트 */
+  bytesTransferred?: number;
+  /** 전체 바이트 */
+  totalBytes?: number;
+}
+
+/**
+ * 동기화 상세 진행률 상태
+ */
+export type SyncProgressStatus = 'IDLE' | 'QUEUED' | 'PROCESSING' | 'DONE' | 'FAILED';
+
+/**
+ * 동기화 진행률 응답 (상세)
+ * GET /files/sync-events/:syncEventId/progress
+ */
+export interface SyncProgressResponse {
+  /** 동기화 이벤트 ID */
+  syncEventId: string;
+  /** 파일 ID */
+  fileId?: string | null;
+  /** 이벤트 타입 */
+  eventType?: SyncEventType;
+  /** 상태 */
+  status: SyncProgressStatus;
+  /** 진행률 정보 */
+  progress?: SyncProgressInfo;
+  /** 처리 시작 시간 */
+  startedAt?: string;
+  /** 마지막 업데이트 시간 */
+  updatedAt?: string;
+  /** 에러 메시지 */
+  errorMessage?: string | null;
+  /** 상태 메시지 */
+  message?: string;
+}
+
+/**
  * 파일 동기화 상태 응답
  */
 export interface FileSyncStatusResponse {
@@ -787,4 +837,138 @@ export interface FileApiLogEntry {
   response?: unknown;
   error?: string;
   timestamp: Date;
+}
+
+// ============================================
+// 202.다운로드 (Download with Range Request)
+// ============================================
+
+/**
+ * 다운로드 파일 상태
+ */
+export type DownloadFileStatus =
+  | 'pending'      // 대기 중
+  | 'downloading'  // 다운로드 중
+  | 'paused'       // 일시정지
+  | 'verifying'    // 체크섬 검증 중
+  | 'completed'    // 완료 (검증 성공)
+  | 'error'        // 오류
+  | 'cancelled';   // 취소됨
+
+/**
+ * 다운로드 진행 상태 (이어받기용)
+ */
+export interface DownloadProgress {
+  fileId: string;
+  etag: string;
+  totalSize: number;
+  downloadedSize: number;
+  chunks: Blob[];
+}
+
+/**
+ * Range 다운로드 옵션
+ */
+export interface RangeDownloadOptions {
+  /** 시작 바이트 */
+  start?: number;
+  /** 끝 바이트 */
+  end?: number;
+  /** ETag for safe resume (If-Range 헤더) */
+  ifRange?: string;
+}
+
+/**
+ * 병렬 다운로드 옵션
+ */
+export interface ParallelDownloadOptions {
+  /** 청크 크기 (기본: 10MB) */
+  chunkSize?: number;
+  /** 동시 다운로드 수 (기본: 4) */
+  concurrency?: number;
+  /** 진행률 콜백 */
+  onProgress?: (percent: number, downloadedBytes: number, totalBytes: number) => void;
+}
+
+/**
+ * Content-Range 정보
+ */
+export interface ContentRange {
+  start: number;
+  end: number;
+  total: number;
+}
+
+/**
+ * 다운로드 응답 (메타데이터 포함)
+ */
+export interface DownloadResponse {
+  blob: Blob;
+  filename: string;
+  /** ETag 헤더 값 */
+  etag?: string;
+  /** X-Checksum-SHA256 헤더 값 */
+  checksum?: string;
+  /** 전체 파일 크기 */
+  totalSize: number;
+  /** 206 Partial Content 여부 */
+  isPartial: boolean;
+  /** Content-Range 정보 (부분 응답시) */
+  contentRange?: ContentRange;
+}
+
+/**
+ * 체크섬 검증 결과
+ */
+export interface ChecksumVerificationResult {
+  isValid: boolean;
+  expected: string;
+  actual: string;
+}
+
+/**
+ * 다운로드 파일 정보 (useDownload 훅용)
+ */
+export interface DownloadFile {
+  /** 고유 ID (클라이언트 생성) */
+  id: string;
+  /** 파일 ID */
+  fileId: string;
+  /** 파일명 */
+  fileName: string;
+  /** 파일 크기 (bytes) */
+  fileSize: number;
+  /** 다운로드 상태 */
+  status: DownloadFileStatus;
+  /** 진행률 (0-100) */
+  progress: number;
+  /** 다운로드된 크기 */
+  downloadedSize: number;
+  /** ETag (이어받기용) */
+  etag?: string;
+  /** 서버에서 받은 체크섬 */
+  serverChecksum?: string;
+  /** 오류 메시지 */
+  error?: string;
+  /** 병렬 다운로드 사용 여부 */
+  useParallel: boolean;
+  /** 이어받기용 청크 저장 */
+  chunks?: Blob[];
+  /** 체크섬 검증 결과 */
+  checksumVerified?: boolean;
+}
+
+/**
+ * localStorage에 저장할 다운로드 세션 정보 (이어받기용)
+ */
+export interface StoredDownloadSession {
+  id: string;
+  fileId: string;
+  fileName: string;
+  fileSize: number;
+  downloadedSize: number;
+  etag: string;
+  serverChecksum?: string;
+  useParallel: boolean;
+  createdAt: string;
 }

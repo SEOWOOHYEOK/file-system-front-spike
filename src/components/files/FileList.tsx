@@ -20,6 +20,8 @@ interface FileItem {
   size: number;
   mimeType: string;
   storageStatus: { cache: string | null; nas: string | null };
+  /** 파일 생성자 (업로더) ID */
+  createdBy?: string;
   updatedAt: string;
 }
 
@@ -122,7 +124,13 @@ export function FileList({
               </div>
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              파일 유형
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               크기
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              등록자
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               수정일
@@ -157,6 +165,7 @@ export function FileList({
               type="file"
               mimeType={file.mimeType}
               size={file.size}
+              createdBy={file.createdBy}
               updatedAt={file.updatedAt}
               isSelected={selectedItems.includes(file.id)}
               isFavorite={isFavorite(file.id)}

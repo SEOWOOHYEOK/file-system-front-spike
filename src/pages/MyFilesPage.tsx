@@ -5,11 +5,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useInternalAuth } from '../hooks/useInternalAuth';
 import { useMultipartUpload } from '../hooks/useMultipartUpload';
+import { useDownload } from '../hooks/useDownload';
 import { folderApi } from '../api/folderApi';
 import { fileApi } from '../api/fileApi';
 import { trashApi } from '../api/trashApi';
 import { userApi } from '../api/userApi';
 import { adminSystemApi } from '../api/adminApi';
+import { FileDownloadManager } from '../components/FileDownloadManager';
+import { FileUploadModal } from '../components/FileUploadModal';
 import {
   FileSidebar,
   FileToolbar,
@@ -160,14 +163,32 @@ export function MyFilesPage() {
     resumeUpload,
     cancelUpload,
     cancelAll,
-    clearCompleted,
+    clearCompleted: clearCompletedUploads,
     isUploading,
   } = useMultipartUpload();
+
+  // ============================================
+  // 다운로드 훅
+  // ============================================
+  const {
+    downloadFiles,
+    startDownload,
+    pauseDownload,
+    resumeDownload,
+    cancelDownload,
+    clearCompleted: clearCompletedDownloads,
+    isDownloading,
+  } = useDownload();
 
   // ============================================
   // 드래그 상태
   // ============================================
   const [isDragging, setIsDragging] = useState(false);
+
+  // ============================================
+  // 업로드 모달 상태
+  // ============================================
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   // ============================================
   // 폴더 API 호출
@@ -351,23 +372,30 @@ export function MyFilesPage() {
   // ============================================
   // 파일 다운로드
   // ============================================
-  const handleFileDownload = useCallback(async (fileId: string, fileName: string) => {
+  const handleFileDownload = useCallback(async (fileId: string, fileName: string, fileSize?: number) => {
     if (!auth.token) return;
-    try {
-      const { blob, filename } = await fileApi.download(auth.token, fileId);
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename || fileName;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      console.error('Failed to download file:', error);
-      alert('파일 다운로드에 실패했습니다.');
+    
+    // 파일 크기를 알 수 있으면 새로운 다운로드 훅 사용 (진행률 추적, 병렬 다운로드 등)
+    if (fileSize && fileSize > 0) {
+      startDownload(auth.token, fileId, fileName, fileSize);
+    } else {
+      // 파일 크기를 모르면 기존 방식으로 다운로드
+      try {
+        const { blob, filename } = await fileApi.download(auth.token, fileId);
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename || fileName;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (error) {
+        console.error('Failed to download file:', error);
+        alert('파일 다운로드에 실패했습니다.');
+      }
     }
-  }, [auth.token]);
+  }, [auth.token, startDownload]);
 
   // ============================================
   // 파일 업로드
@@ -527,7 +555,9 @@ export function MyFilesPage() {
         break;
       case 'download':
         if (item.type === 'file') {
-          handleFileDownload(item.id, item.name);
+          // 파일 크기 정보 가져오기
+          const fileForDownload = folderContents?.files.find(f => f.id === item.id);
+          handleFileDownload(item.id, item.name, fileForDownload?.size);
         }
         break;
       case 'rename':
@@ -643,9 +673,10 @@ export function MyFilesPage() {
     setIsDragging(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      handleFileUpload(e.dataTransfer.files);
+      addFiles(Array.from(e.dataTransfer.files));
+      setIsUploadModalOpen(true);
     }
-  }, [handleFileUpload]);
+  }, [addFiles]);
 
   // ============================================
   // 인증 체크
@@ -687,7 +718,7 @@ export function MyFilesPage() {
             setModalInput('');
             setActiveModal('createFolder');
           }}
-          onUpload={() => fileInputRef.current?.click()}
+          onUpload={() => setIsUploadModalOpen(true)}
           viewMode={viewMode}
           onViewModeChange={setViewMode}
           sortBy={sortBy}
@@ -754,7 +785,7 @@ export function MyFilesPage() {
                     onFolderClick={navigateToFolder}
                     onFileClick={(id) => {
                       const file = searchResults.results.find(r => r.id === id);
-                      if (file) handleFileDownload(id, file.name);
+                      if (file) handleFileDownload(id, file.name, 'size' in file ? file.size : undefined);
                     }}
                     onContextMenu={handleContextMenu}
                     selectedItems={selectedItems.map(s => s.id)}
@@ -793,7 +824,7 @@ export function MyFilesPage() {
                     onFolderClick={navigateToFolder}
                     onFileClick={(id) => {
                       const file = searchResults.results.find(r => r.id === id);
-                      if (file) handleFileDownload(id, file.name);
+                      if (file) handleFileDownload(id, file.name, 'size' in file ? file.size : undefined);
                     }}
                     onContextMenu={handleContextMenu}
                     selectedItems={selectedItems.map(s => s.id)}
@@ -820,7 +851,7 @@ export function MyFilesPage() {
                     onFolderClick={navigateToFolder}
                     onFileClick={(id) => {
                       const file = folderContents.files.find(f => f.id === id);
-                      if (file) handleFileDownload(id, file.name);
+                      if (file) handleFileDownload(id, file.name, file.size);
                     }}
                     onContextMenu={handleContextMenu}
                     selectedItems={selectedItems.map(s => s.id)}
@@ -845,7 +876,7 @@ export function MyFilesPage() {
                     onFolderClick={navigateToFolder}
                     onFileClick={(id) => {
                       const file = folderContents.files.find(f => f.id === id);
-                      if (file) handleFileDownload(id, file.name);
+                      if (file) handleFileDownload(id, file.name, file.size);
                     }}
                     onContextMenu={handleContextMenu}
                     selectedItems={selectedItems.map(s => s.id)}
@@ -973,7 +1004,7 @@ export function MyFilesPage() {
                 업로드 중: {uploadFiles.filter(f => f.status === 'uploading').length}개
               </span>
               <button
-                onClick={clearCompleted}
+                onClick={clearCompletedUploads}
                 className="text-xs text-blue-500 hover:text-blue-600"
               >
                 완료 항목 지우기
@@ -982,23 +1013,36 @@ export function MyFilesPage() {
             <div className="space-y-2 max-h-32 overflow-auto">
               {uploadFiles.map((file) => (
                 <div key={file.id} className="flex items-center space-x-2">
-                  <span className="text-sm truncate flex-1">{file.file.name}</span>
+                  <span className="text-sm truncate flex-1">{file.file?.name || '파일'}</span>
                   <div className="w-32 h-2 bg-gray-200 rounded-full overflow-hidden">
                     <div
                       className={`h-full transition-all ${
                         file.status === 'completed' ? 'bg-green-500' :
                         file.status === 'error' ? 'bg-red-500' :
+                        file.status === 'syncing' ? 'bg-orange-500' :
                         'bg-blue-500'
                       }`}
-                      style={{ width: `${file.progress}%` }}
+                      style={{ width: `${file.status === 'syncing' ? 100 : file.uploadProgress}%` }}
                     />
                   </div>
-                  <span className="text-xs text-gray-500 w-12">{file.progress}%</span>
+                  <span className="text-xs text-gray-500 w-12">
+                    {file.status === 'syncing' ? '동기화' : `${file.uploadProgress}%`}
+                  </span>
                 </div>
               ))}
             </div>
           </div>
         )}
+
+        {/* 다운로드 매니저 */}
+        <FileDownloadManager
+          downloads={downloadFiles}
+          onPause={pauseDownload}
+          onResume={(id) => auth.token && resumeDownload(id, auth.token)}
+          onCancel={cancelDownload}
+          onClearCompleted={clearCompletedDownloads}
+          isDownloading={isDownloading}
+        />
       </div>
 
       {/* 컨텍스트 메뉴 */}
@@ -1037,13 +1081,51 @@ export function MyFilesPage() {
         token={auth.token || ''}
       />
 
-      {/* 숨겨진 파일 입력 */}
+      {/* 숨겨진 파일 입력 (드래그 앤 드롭용) */}
       <input
         ref={fileInputRef}
         type="file"
         multiple
         className="hidden"
-        onChange={(e) => e.target.files && handleFileUpload(e.target.files)}
+        onChange={(e) => {
+          if (e.target.files) {
+            addFiles(Array.from(e.target.files));
+            setIsUploadModalOpen(true);
+          }
+        }}
+      />
+
+      {/* 업로드 모달 */}
+      <FileUploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
+        uploadFiles={uploadFiles}
+        onAddFiles={(files) => addFiles(files)}
+        onRemoveFile={removeFile}
+        onCancelFile={(id) => {
+          if (auth.token) {
+            cancelUpload(id, auth.token);
+          }
+        }}
+        onPauseFile={pauseUpload}
+        onResumeFile={(id, file) => {
+          if (auth.token) {
+            resumeUpload(id, auth.token, file);
+          }
+        }}
+        onStartUpload={() => {
+          if (auth.token && currentFolderId) {
+            startUpload(auth.token, currentFolderId);
+          }
+        }}
+        onCancelAll={() => {
+          if (auth.token) {
+            cancelAll(auth.token);
+          }
+        }}
+        onClearCompleted={clearCompletedUploads}
+        isUploading={isUploading}
+        disabled={!auth.token || !currentFolderId}
       />
     </div>
   );
