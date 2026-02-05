@@ -257,17 +257,14 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
             pollingIntervals.current.delete(id);
           }
         } else if (response.status === 'IDLE') {
-          // IDLE 상태도 완료로 처리 (동기화 필요 없음)
           updateFileState(id, {
-            status: 'completed',
-            syncProgress: 100,
-            syncStatus: 'IDLE',
+            status: 'syncing',
+            syncProgress: 0,
+            syncProgressInfo: response.progress,
+            syncStatus: 'QUEUED',
+            syncMessage: '동기화 대기 중...',
           });
-          const interval = pollingIntervals.current.get(id);
-          if (interval) {
-            clearInterval(interval);
-            pollingIntervals.current.delete(id);
-          }
+          
         }
       } catch (error) {
         console.error('Sync polling error:', error);
@@ -552,10 +549,10 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
             syncEventId: result.syncEventId,
             syncMessage: '동기화 준비 중...',
           });
-          // 동기화 상태 폴링 시작 (서버 준비 시간 1초 대기)
+          // 동기화 상태 폴링 시작 (서버 준비 시간 0.3초 대기)
           setTimeout(() => {
             startSyncPolling(uploadFile.id, result.syncEventId, token);
-          }, 1000);
+          }, 300);
         }
       });
     } catch (error) {
