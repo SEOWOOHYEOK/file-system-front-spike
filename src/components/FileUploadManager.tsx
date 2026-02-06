@@ -58,13 +58,27 @@ function getFileIcon(fileName: string, mimeType: string): { icon: string; color:
 }
 
 /**
+ * 예상 대기 시간 포맷
+ */
+function formatWaitTime(seconds: number): string {
+  if (seconds < 60) return `약 ${seconds}초`;
+  const minutes = Math.ceil(seconds / 60);
+  if (minutes < 60) return `약 ${minutes}분`;
+  const hours = Math.floor(minutes / 60);
+  const remainMinutes = minutes % 60;
+  return `약 ${hours}시간 ${remainMinutes}분`;
+}
+
+/**
  * 상태별 색상 및 텍스트
  */
 function getStatusInfo(
   status: UploadFileStatus, 
   uploadProgress: number, 
   syncProgress: number,
-  syncProgressInfo?: SyncProgressInfo
+  syncProgressInfo?: SyncProgressInfo,
+  queuePosition?: number,
+  estimatedWaitSeconds?: number
 ): {
   barColor: string;
   text: string;
@@ -73,6 +87,16 @@ function getStatusInfo(
   switch (status) {
     case 'pending':
       return { barColor: 'bg-gray-300', text: '대기 중', textColor: 'text-gray-500' };
+    case 'queued': {
+      const posText = queuePosition ? `${queuePosition}번째` : '';
+      const waitText = estimatedWaitSeconds ? formatWaitTime(estimatedWaitSeconds) : '';
+      const detail = [posText, waitText].filter(Boolean).join(' · ');
+      return {
+        barColor: 'bg-indigo-400 animate-pulse',
+        text: detail ? `대기열 ${detail}` : '대기열 대기 중',
+        textColor: 'text-indigo-600',
+      };
+    }
     case 'uploading':
       return { barColor: 'bg-blue-500', text: `${uploadProgress}%`, textColor: 'text-blue-600' };
     case 'paused':
@@ -101,6 +125,7 @@ function getStatusInfo(
 function calculateProgress(status: UploadFileStatus, uploadProgress: number, syncProgress: number): number {
   switch (status) {
     case 'pending':
+    case 'queued':
       return 0;
     case 'uploading':
       return uploadProgress;
@@ -178,7 +203,9 @@ const FileItem: React.FC<FileItemProps> = ({
     uploadFile.status,
     uploadFile.uploadProgress,
     uploadFile.syncProgress,
-    uploadFile.syncProgressInfo
+    uploadFile.syncProgressInfo,
+    uploadFile.queuePosition,
+    uploadFile.estimatedWaitSeconds
   );
   const progress = calculateProgress(
     uploadFile.status,
@@ -186,7 +213,7 @@ const FileItem: React.FC<FileItemProps> = ({
     uploadFile.syncProgress
   );
 
-  const canCancel = ['uploading', 'syncing'].includes(uploadFile.status);
+  const canCancel = ['uploading', 'syncing', 'queued'].includes(uploadFile.status);
   const canPause = uploadFile.status === 'uploading' && onPause;
   const canResume = (uploadFile.status === 'paused' || uploadFile.status === 'error') && onResume;
 
@@ -205,7 +232,8 @@ const FileItem: React.FC<FileItemProps> = ({
       <div className={`text-2xl ${color}`}>
         {uploadFile.status === 'completed' ? '✅' : 
          uploadFile.status === 'error' ? '❌' : 
-         uploadFile.status === 'paused' ? '⏸️' : icon}
+         uploadFile.status === 'paused' ? '⏸️' :
+         uploadFile.status === 'queued' ? '🕐' : icon}
       </div>
 
       {/* 파일 정보 및 진행률 */}
@@ -235,6 +263,22 @@ const FileItem: React.FC<FileItemProps> = ({
             style={{ width: `${progress}%` }}
           />
         </div>
+
+        {/* 대기열 상세 정보 */}
+        {uploadFile.status === 'queued' && (
+          <div className="text-xs text-indigo-500 mt-1 flex items-center gap-2 flex-wrap">
+            {uploadFile.queuePosition && (
+              <span className="bg-indigo-100 px-1.5 py-0.5 rounded">
+                순번: {uploadFile.queuePosition}번째
+              </span>
+            )}
+            {uploadFile.estimatedWaitSeconds && (
+              <span className="bg-indigo-100 px-1.5 py-0.5 rounded">
+                예상 대기: {formatWaitTime(uploadFile.estimatedWaitSeconds)}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* 동기화 상세 진행률 */}
         {uploadFile.status === 'syncing' && uploadFile.syncProgressInfo && (
@@ -447,6 +491,7 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
   const stats = {
     total: uploadFiles.length,
     pending: uploadFiles.filter((f) => f.status === 'pending').length,
+    queued: uploadFiles.filter((f) => f.status === 'queued').length,
     uploading: uploadFiles.filter((f) => f.status === 'uploading' || f.status === 'syncing').length,
     paused: uploadFiles.filter((f) => f.status === 'paused').length,
     completed: uploadFiles.filter((f) => f.status === 'completed').length,
@@ -475,6 +520,7 @@ export const FileUploadManager: React.FC<FileUploadManagerProps> = ({
             {stats.total > 0 && (
               <span className="text-sm text-gray-500">
                 {stats.completed}/{stats.total} 완료
+                {stats.queued > 0 && ` (${stats.queued}개 대기열)`}
                 {stats.paused > 0 && ` (${stats.paused}개 일시정지)`}
               </span>
             )}

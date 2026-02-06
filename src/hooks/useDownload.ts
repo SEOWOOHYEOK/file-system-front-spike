@@ -22,23 +22,34 @@ const PARALLEL_MIN_SIZE = 100 * 1024 * 1024;
 const STORAGE_KEY = 'download_sessions';
 
 /**
- * localStorage에서 저장된 세션 목록 가져오기
+ * localStorage 캐시 (js-cache-storage 규칙)
+ * localStorage I/O는 동기적이고 비용이 크므로 메모리에 캐싱
+ */
+let downloadSessionsCache: StoredDownloadSession[] | null = null;
+
+/**
+ * localStorage에서 저장된 세션 목록 가져오기 (캐시 사용)
  */
 const getStoredSessions = (): StoredDownloadSession[] => {
+  if (downloadSessionsCache !== null) {
+    return downloadSessionsCache;
+  }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    downloadSessionsCache = stored ? JSON.parse(stored) : [];
+    return downloadSessionsCache;
   } catch {
-    return [];
+    downloadSessionsCache = [];
+    return downloadSessionsCache;
   }
 };
 
 /**
- * localStorage에 세션 저장
+ * localStorage에 세션 저장 (캐시 동기화)
  */
 const saveSession = (session: StoredDownloadSession): void => {
   try {
-    const sessions = getStoredSessions();
+    const sessions = [...getStoredSessions()];
     const existingIndex = sessions.findIndex(s => s.id === session.id);
     if (existingIndex >= 0) {
       sessions[existingIndex] = session;
@@ -46,19 +57,21 @@ const saveSession = (session: StoredDownloadSession): void => {
       sessions.push(session);
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    downloadSessionsCache = sessions;
   } catch (error) {
     console.error('Failed to save download session:', error);
   }
 };
 
 /**
- * localStorage에서 세션 삭제
+ * localStorage에서 세션 삭제 (캐시 동기화)
  */
 const removeStoredSession = (id: string): void => {
   try {
     const sessions = getStoredSessions();
     const filtered = sessions.filter(s => s.id !== id);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    downloadSessionsCache = filtered;
   } catch (error) {
     console.error('Failed to remove download session:', error);
   }

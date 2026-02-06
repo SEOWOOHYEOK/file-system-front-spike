@@ -20,6 +20,9 @@ import type {
   CompleteMultipartResponse,
   SessionStatusResponse,
   AbortSessionResponse,
+  QueueStatusResponse,
+  QueueCancelResponse,
+  QueueOverallStatus,
   SyncEventStatusResponse,
   FileSyncStatusResponse,
   SyncProgressResponse,
@@ -33,6 +36,16 @@ import type {
 const api = axios.create({
   baseURL: '/v1',
 });
+
+/**
+ * 대용량 업로드 전용 API base URL
+ * 개발 환경에서 Vite 프록시(http-proxy)는 대량의 바이너리 데이터를
+ * Node.js 메모리에 버퍼링하여, 10GB 파일 업로드 시 ~1.5GB 힙 제한에 도달해 죽음.
+ * 멀티파트 파트 업로드만 백엔드에 직접 요청하여 프록시를 우회.
+ */
+const UPLOAD_API_BASE = import.meta.env.DEV
+  ? (import.meta.env.VITE_API_URL || 'http://localhost:3200') + '/v1'
+  : '/v1';
 
 // API 로그 콜백
 let logCallback: ((log: FileApiLogEntry) => void) | null = null;
@@ -681,60 +694,100 @@ export const fileApi = {
   /**
    * 파트 업로드
    * PUT /v1/files/multipart/:sessionId/parts/:partNumber
+   * - Blob 직접 전송으로 ArrayBuffer 복사 메모리 절약
+   * - 네트워크 에러 시 최대 3회 재시도 (지수 백오프)
    */
   multipartUploadPart: async (
     token: string,
     sessionId: string,
     partNumber: number,
-    data: ArrayBuffer,
+    data: ArrayBuffer | Blob,
     onProgress?: (loaded: number, total: number) => void
   ): Promise<UploadPartResponse> => {
-    const startTime = Date.now();
-    const logEntry: FileApiLogEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      method: 'PUT',
-      url: `/files/multipart/${sessionId}/parts/${partNumber}`,
-      status: 0,
-      duration: 0,
-      request: { sessionId, partNumber, size: data.byteLength },
-      timestamp: new Date(),
-    };
+    const MAX_RETRIES = 3;
+    const dataSize = data instanceof Blob ? data.size : data.byteLength;
 
-    try {
-      const response = await axios.put<UploadPartResponse>(
-        `/v1/files/multipart/${sessionId}/parts/${partNumber}`,
-        data,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/octet-stream',
-          },
-          onUploadProgress: (progressEvent) => {
-            if (onProgress && progressEvent.total) {
-              onProgress(progressEvent.loaded, progressEvent.total);
-            }
-          },
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      const startTime = Date.now();
+      const logEntry: FileApiLogEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+        method: 'PUT',
+        url: `/files/multipart/${sessionId}/parts/${partNumber}`,
+        status: 0,
+        duration: 0,
+        request: { sessionId, partNumber, size: dataSize, attempt },
+        timestamp: new Date(),
+      };
+
+      try {
+        // UPLOAD_API_BASE: 개발 환경에서 Vite 프록시 우회하여 백엔드 직접 요청
+        const response = await axios.put<UploadPartResponse>(
+          `${UPLOAD_API_BASE}/files/multipart/${sessionId}/parts/${partNumber}`,
+          data,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/octet-stream',
+            },
+            timeout: 300000, // 파트당 5분 타임아웃
+            maxContentLength: Infinity,
+            maxBodyLength: Infinity,
+            onUploadProgress: (progressEvent) => {
+              if (onProgress && progressEvent.total) {
+                onProgress(progressEvent.loaded, progressEvent.total);
+              }
+            },
+          }
+        );
+
+        logEntry.status = response.status;
+        logEntry.duration = Date.now() - startTime;
+        logEntry.response = response.data;
+        if (logCallback) logCallback(logEntry);
+
+        return response.data;
+      } catch (error) {
+        logEntry.duration = Date.now() - startTime;
+        if (axios.isAxiosError(error)) {
+          logEntry.status = error.response?.status || 0;
+          logEntry.error = error.message;
+          logEntry.response = error.response?.data;
+        } else {
+          logEntry.error = error instanceof Error ? error.message : 'Unknown error';
         }
-      );
+        if (logCallback) logCallback(logEntry);
 
-      logEntry.status = response.status;
-      logEntry.duration = Date.now() - startTime;
-      logEntry.response = response.data;
-      if (logCallback) logCallback(logEntry);
+        // 재시도 가능한 에러인지 확인
+        const isRetryable =
+          !error ||
+          (axios.isAxiosError(error) && (
+            !error.response ||                    // 네트워크 에러 (응답 없음)
+            error.code === 'ECONNABORTED' ||      // 타임아웃
+            error.code === 'ERR_NETWORK' ||       // 네트워크 에러
+            error.response?.status === 502 ||     // Bad Gateway
+            error.response?.status === 503 ||     // Service Unavailable
+            error.response?.status === 504 ||     // Gateway Timeout
+            error.response?.status === 429        // Too Many Requests
+          ));
 
-      return response.data;
-    } catch (error) {
-      logEntry.duration = Date.now() - startTime;
-      if (axios.isAxiosError(error)) {
-        logEntry.status = error.response?.status || 0;
-        logEntry.error = error.message;
-        logEntry.response = error.response?.data;
-      } else {
-        logEntry.error = error instanceof Error ? error.message : 'Unknown error';
+        if (isRetryable && attempt < MAX_RETRIES) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), 10000); // 1s, 2s, 4s (max 10s)
+          console.warn(
+            `[Upload] Part ${partNumber} failed (attempt ${attempt + 1}/${MAX_RETRIES + 1}), ` +
+            `retrying in ${delay}ms...`,
+            error instanceof Error ? error.message : error
+          );
+          await new Promise((resolve) => setTimeout(resolve, delay));
+          continue;
+        }
+
+        // 재시도 불가 또는 최대 재시도 초과
+        throw error;
       }
-      if (logCallback) logCallback(logEntry);
-      throw error;
     }
+
+    // 도달 불가능하지만 TypeScript를 위해
+    throw new Error(`Part ${partNumber} upload failed after ${MAX_RETRIES + 1} attempts`);
   },
 
   /**
@@ -767,6 +820,39 @@ export const fileApi = {
     sessionId: string
   ): Promise<AbortSessionResponse> =>
     apiCall<AbortSessionResponse>('DELETE', `/files/multipart/${sessionId}`, token),
+
+  // ============================================
+  // 201-2.대기열 (Queue) API
+  // ============================================
+
+  /**
+   * 대기열 상태 폴링
+   * GET /v1/files/multipart/queue/:ticket
+   */
+  queuePoll: async (
+    token: string,
+    ticket: string
+  ): Promise<QueueStatusResponse> =>
+    apiCall<QueueStatusResponse>('GET', `/files/multipart/queue/${ticket}`, token),
+
+  /**
+   * 대기열 취소
+   * DELETE /v1/files/multipart/queue/:ticket
+   */
+  queueCancel: async (
+    token: string,
+    ticket: string
+  ): Promise<QueueCancelResponse> =>
+    apiCall<QueueCancelResponse>('DELETE', `/files/multipart/queue/${ticket}`, token),
+
+  /**
+   * 대기열 전체 현황 조회
+   * GET /v1/files/multipart/queue/status
+   */
+  queueOverallStatus: async (
+    token: string
+  ): Promise<QueueOverallStatus> =>
+    apiCall<QueueOverallStatus>('GET', '/files/multipart/queue/status', token),
 
   // ============================================
   // 250.동기화 API

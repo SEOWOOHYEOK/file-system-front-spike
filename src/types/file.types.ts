@@ -572,14 +572,80 @@ export interface InitiateMultipartRequest {
 }
 
 /**
- * 멀티파트 업로드 초기화 응답
+ * 멀티파트 업로드 초기화 응답 (유니온 타입)
+ * - 201: 슬롯 확보 → ACTIVE (즉시 업로드 시작)
+ * - 202: 슬롯 부족 → WAITING (대기열 폴링 필요)
  */
-export interface InitiateMultipartResponse {
+export type InitiateMultipartResponse = InitiateActiveResponse | InitiateQueuedResponse;
+
+export interface InitiateActiveResponse {
+  status: 'ACTIVE';
   sessionId: string;
-  uploadId?: string;
   partSize: number;
   totalParts: number;
   expiresAt: string;
+}
+
+export interface InitiateQueuedResponse {
+  status: 'WAITING';
+  queueTicket: string;
+  position: number;
+  estimatedWaitSeconds: number;
+}
+
+/**
+ * 대기열 폴링 응답 (유니온 타입)
+ */
+export type QueueStatusResponse =
+  | QueueWaitingResponse
+  | QueueReadyResponse
+  | QueueExpiredResponse
+  | QueueCancelledResponse;
+
+export interface QueueWaitingResponse {
+  status: 'WAITING';
+  position: number;
+  estimatedWaitSeconds: number;
+}
+
+export interface QueueReadyResponse {
+  status: 'READY';
+  sessionId: string;
+  partSize: number;
+  totalParts: number;
+  expiresAt: string;
+  claimDeadline: string;
+}
+
+export interface QueueExpiredResponse {
+  status: 'EXPIRED';
+  message: string;
+}
+
+export interface QueueCancelledResponse {
+  status: 'CANCELLED';
+  message: string;
+}
+
+/**
+ * 대기열 취소 응답
+ */
+export interface QueueCancelResponse {
+  success: boolean;
+  message: string;
+}
+
+/**
+ * 대기열 전체 현황 응답
+ */
+export interface QueueOverallStatus {
+  activeSessions: number;
+  maxActiveSessions: number;
+  waitingCount: number;
+  maxQueueSize: number;
+  totalUploadBytes: number;
+  maxTotalUploadBytes: number;
+  availableSlots: number;
 }
 
 /**

@@ -1002,6 +1002,8 @@ export function MyFilesPage() {
             <div className="flex items-center justify-between mb-2">
               <span className="text-sm font-medium">
                 업로드 중: {uploadFiles.filter(f => f.status === 'uploading').length}개
+                {uploadFiles.filter(f => f.status === 'queued').length > 0 &&
+                  ` · 대기열: ${uploadFiles.filter(f => f.status === 'queued').length}개`}
               </span>
               <button
                 onClick={clearCompletedUploads}
@@ -1020,13 +1022,20 @@ export function MyFilesPage() {
                         file.status === 'completed' ? 'bg-green-500' :
                         file.status === 'error' ? 'bg-red-500' :
                         file.status === 'syncing' ? 'bg-orange-500' :
+                        file.status === 'queued' ? 'bg-indigo-400 animate-pulse' :
                         'bg-blue-500'
                       }`}
-                      style={{ width: `${file.status === 'syncing' ? 100 : file.uploadProgress}%` }}
+                      style={{ width: `${
+                        file.status === 'syncing' ? 100 :
+                        file.status === 'queued' ? 100 :
+                        file.uploadProgress
+                      }%` }}
                     />
                   </div>
-                  <span className="text-xs text-gray-500 w-12">
-                    {file.status === 'syncing' ? '동기화' : `${file.uploadProgress}%`}
+                  <span className="text-xs text-gray-500 w-16">
+                    {file.status === 'syncing' ? '동기화' :
+                     file.status === 'queued' ? `대기열 ${file.queuePosition || ''}` :
+                     `${file.uploadProgress}%`}
                   </span>
                 </div>
               ))}

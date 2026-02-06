@@ -16,6 +16,7 @@ import type {
  */
 export type UploadFileStatus =
   | 'pending'      // 대기 중
+  | 'queued'       // 서버 대기열 대기 중 (슬롯 부족)
   | 'uploading'    // 업로드 중
   | 'paused'       // 일시정지
   | 'syncing'      // NAS 동기화 중
@@ -46,6 +47,12 @@ export interface UploadFile {
   totalParts: number;
   partSize?: number;       // 파트 크기 (이어서 업로드용)
   folderId?: string;       // 폴더 ID (이어서 업로드용)
+  /** 대기열 티켓 (queued 상태에서 사용) */
+  queueTicket?: string;
+  /** 대기열 현재 순번 */
+  queuePosition?: number;
+  /** 대기열 예상 대기 시간 (초) */
+  estimatedWaitSeconds?: number;
 }
 
 /**
@@ -96,23 +103,46 @@ const MULTIPART_MIN_SIZE = 100 * 1024 * 1024;
 const SYNC_POLL_INTERVAL = 2000;
 
 /**
- * localStorage에서 저장된 세션 목록 가져오기
+ * 대기열 폴링 간격 (ms) - 5초
+ */
+const QUEUE_POLL_INTERVAL = 5000;
+
+/**
+ * 대기열 최대 폴링 횟수 (30분 / 5초 = 360회)
+ */
+const QUEUE_MAX_ATTEMPTS = 360;
+
+/**
+ * localStorage 캐시 (js-cache-storage 규칙)
+ * localStorage I/O는 동기적이고 비용이 크므로 메모리에 캐싱
+ */
+let sessionsCache: StoredUploadSession[] | null = null;
+
+/**
+ * localStorage에서 저장된 세션 목록 가져오기 (캐시 사용)
  */
 const getStoredSessions = (): StoredUploadSession[] => {
+  if (sessionsCache !== null) {
+    return sessionsCache;
+  }
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
-    return stored ? JSON.parse(stored) : [];
+    const parsed: StoredUploadSession[] = stored ? JSON.parse(stored) : [];
+    sessionsCache = parsed;
+    return parsed;
   } catch {
-    return [];
+    const empty: StoredUploadSession[] = [];
+    sessionsCache = empty;
+    return empty;
   }
 };
 
 /**
- * localStorage에 세션 저장
+ * localStorage에 세션 저장 (캐시 동기화)
  */
 const saveSession = (session: StoredUploadSession): void => {
   try {
-    const sessions = getStoredSessions();
+    const sessions = [...getStoredSessions()];
     const existingIndex = sessions.findIndex(s => s.sessionId === session.sessionId);
     if (existingIndex >= 0) {
       sessions[existingIndex] = session;
@@ -120,19 +150,21 @@ const saveSession = (session: StoredUploadSession): void => {
       sessions.push(session);
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(sessions));
+    sessionsCache = sessions;
   } catch (error) {
     console.error('Failed to save session to localStorage:', error);
   }
 };
 
 /**
- * localStorage에서 세션 삭제
+ * localStorage에서 세션 삭제 (캐시 동기화)
  */
 const removeStoredSession = (sessionId: string): void => {
   try {
     const sessions = getStoredSessions();
     const filtered = sessions.filter(s => s.sessionId !== sessionId);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(filtered));
+    sessionsCache = filtered;
   } catch (error) {
     console.error('Failed to remove session from localStorage:', error);
   }
@@ -147,6 +179,35 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   const pollingIntervals = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const abortControllers = useRef<Map<string, boolean>>(new Map());
   const pauseFlags = useRef<Map<string, boolean>>(new Map());
+
+  /**
+   * 진행률 전용 ref (rerender-use-ref-transient-values 패턴)
+   * - onUploadProgress 콜백은 초당 수십~수백회 호출됨
+   * - 매번 setState하면 React 리렌더 폭주 → UI 3초 멈춤
+   * - ref에 저장하고 rAF로 ~60fps에만 실제 상태 반영
+   */
+  const progressRef = useRef<Map<string, { uploadProgress: number; completedParts: number[] }>>(new Map());
+  const rafIdRef = useRef<number | null>(null);
+
+  /**
+   * rAF 기반 진행률 동기화 (화면 갱신 주기에만 setState)
+   */
+  const scheduleProgressFlush = useCallback(() => {
+    if (rafIdRef.current !== null) return; // 이미 예약됨
+    rafIdRef.current = requestAnimationFrame(() => {
+      rafIdRef.current = null;
+      const updates = progressRef.current;
+      if (updates.size === 0) return;
+
+      setUploadFiles((prev) =>
+        prev.map((f) => {
+          const update = updates.get(f.id);
+          if (!update) return f;
+          return { ...f, ...update };
+        })
+      );
+    });
+  }, []);
 
   /**
    * 파일 추가
@@ -174,17 +235,30 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
       clearInterval(interval);
       pollingIntervals.current.delete(id);
     }
+    progressRef.current.delete(id);
     setUploadFiles((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
   /**
-   * 파일 상태 업데이트
+   * 파일 상태 업데이트 (즉시 반영 - 상태 변경, 완료, 에러 등)
    */
   const updateFileState = useCallback((id: string, update: Partial<UploadFile>) => {
     setUploadFiles((prev) =>
       prev.map((f) => (f.id === id ? { ...f, ...update } : f))
     );
   }, []);
+
+  /**
+   * 진행률만 업데이트 (rAF 스로틀 - 고빈도 호출용)
+   */
+  const updateProgress = useCallback((id: string, uploadProgress: number, completedParts?: number[]) => {
+    const current = progressRef.current.get(id);
+    progressRef.current.set(id, {
+      uploadProgress,
+      completedParts: completedParts ?? current?.completedParts ?? [],
+    });
+    scheduleProgressFlush();
+  }, [scheduleProgressFlush]);
 
   /**
    * 동기화 상태 폴링 시작 (상세 진행률)
@@ -306,6 +380,58 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   }, [updateFileState]);
 
   /**
+   * 대기열 폴링 (READY 될 때까지)
+   * initiate에서 202(WAITING)를 받은 경우, 서버가 슬롯을 확보할 때까지 폴링합니다.
+   * READY가 되면 sessionId 등의 세션 정보를 반환합니다.
+   */
+  const pollQueueUntilReady = useCallback(async (
+    fileId: string,
+    ticket: string,
+    token: string
+  ): Promise<{ sessionId: string; partSize: number; totalParts: number; expiresAt: string }> => {
+    for (let i = 0; i < QUEUE_MAX_ATTEMPTS; i++) {
+      // 취소 체크
+      if (abortControllers.current.get(fileId)) {
+        try {
+          await fileApi.queueCancel(token, ticket);
+        } catch { /* 무시 */ }
+        throw new Error('Upload cancelled');
+      }
+
+      const response = await fileApi.queuePoll(token, ticket);
+
+      switch (response.status) {
+        case 'WAITING':
+          updateFileState(fileId, {
+            queuePosition: response.position,
+            estimatedWaitSeconds: response.estimatedWaitSeconds,
+          });
+          await new Promise((r) => setTimeout(r, QUEUE_POLL_INTERVAL));
+          break;
+
+        case 'READY':
+          return {
+            sessionId: response.sessionId,
+            partSize: response.partSize,
+            totalParts: response.totalParts,
+            expiresAt: response.expiresAt,
+          };
+
+        case 'EXPIRED':
+          throw new Error('대기열 티켓이 만료되었습니다. 다시 시도해주세요.');
+
+        case 'CANCELLED':
+          throw new Error('대기열이 취소되었습니다.');
+
+        default:
+          throw new Error(`알 수 없는 대기열 상태: ${(response as { status: string }).status}`);
+      }
+    }
+
+    throw new Error('대기 시간이 초과되었습니다. (30분)');
+  }, [updateFileState]);
+
+  /**
    * 단일 파일 멀티파트 업로드
    * @param resumeFrom 이어서 업로드할 경우 세션 정보
    */
@@ -359,7 +485,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
           uploadProgress: Math.round((totalUploaded / uploadFile.file.size) * 100),
         });
       } else {
-        // 새 업로드: 세션 초기화
+        // 새 업로드: 세션 초기화 (Admission Control)
         const initResponse = await fileApi.multipartInitiate(token, {
           fileName: uploadFile.file.name,
           folderId,
@@ -368,9 +494,46 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
           conflictStrategy,
         });
 
-        sessionId = initResponse.sessionId;
-        partSize = initResponse.partSize;
-        totalParts = initResponse.totalParts;
+        let expiresAt: string;
+
+        if (initResponse.status === 'ACTIVE') {
+          // ✅ 슬롯 확보 → 즉시 파트 업로드 시작
+          sessionId = initResponse.sessionId;
+          partSize = initResponse.partSize;
+          totalParts = initResponse.totalParts;
+          expiresAt = initResponse.expiresAt;
+        } else if (initResponse.status === 'WAITING') {
+          // ⏳ 슬롯 부족 → 대기열 등록, 폴링 시작
+          updateFileState(uploadFile.id, {
+            status: 'queued',
+            queueTicket: initResponse.queueTicket,
+            queuePosition: initResponse.position,
+            estimatedWaitSeconds: initResponse.estimatedWaitSeconds,
+          });
+
+          // 대기열 폴링 (READY가 될 때까지 대기)
+          const readyInfo = await pollQueueUntilReady(
+            uploadFile.id,
+            initResponse.queueTicket,
+            token
+          );
+
+          sessionId = readyInfo.sessionId;
+          partSize = readyInfo.partSize;
+          totalParts = readyInfo.totalParts;
+          expiresAt = readyInfo.expiresAt;
+
+          // 대기열 완료 → 업로드 상태로 전환 (대기열 필드 초기화)
+          updateFileState(uploadFile.id, {
+            status: 'uploading',
+            queueTicket: undefined,
+            queuePosition: undefined,
+            estimatedWaitSeconds: undefined,
+          });
+        } else {
+          throw new Error(`initiate 실패: 알 수 없는 응답`);
+        }
+
         uploadedParts = [];
         totalUploaded = 0;
 
@@ -392,7 +555,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
           completedParts: [],
           uploadProgress: 0,
           createdAt: new Date().toISOString(),
-          expiresAt: initResponse.expiresAt,
+          expiresAt,
         });
       }
 
@@ -436,43 +599,47 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
 
         const start = (partNumber - 1) * partSize;
         const end = Math.min(start + partSize, uploadFile.file.size);
+        const chunkSize = end - start;
+        // Blob.slice()로 파일 참조만 생성 (메모리 복사 없음)
         const chunk = uploadFile.file.slice(start, end);
-        const chunkBuffer = await chunk.arrayBuffer();
 
         await fileApi.multipartUploadPart(
           token,
           sessionId,
           partNumber,
-          chunkBuffer,
+          chunk,  // Blob 직접 전송 - ArrayBuffer 변환 불필요
           (loaded, _total) => {
+            // rAF 스로틀: 초당 수백 회 → ~60fps로 제한
             const currentProgress = totalUploaded + loaded;
             const overallProgress = Math.round((currentProgress / uploadFile.file.size) * 100);
-            updateFileState(uploadFile.id, { uploadProgress: overallProgress });
+            updateProgress(uploadFile.id, overallProgress);
           }
         );
 
-        totalUploaded += chunkBuffer.byteLength;
+        totalUploaded += chunkSize;
         uploadedParts.push(partNumber);
 
-        updateFileState(uploadFile.id, {
-          completedParts: [...uploadedParts],
-          uploadProgress: Math.round((totalUploaded / uploadFile.file.size) * 100),
-        });
+        const currentProgress = Math.round((totalUploaded / uploadFile.file.size) * 100);
 
-        // localStorage 업데이트 (진행 상황 저장)
-        saveSession({
-          id: uploadFile.id,
-          sessionId,
-          fileName: uploadFile.file.name,
-          fileSize: uploadFile.file.size,
-          folderId,
-          partSize,
-          totalParts,
-          completedParts: uploadedParts,
-          uploadProgress: Math.round((totalUploaded / uploadFile.file.size) * 100),
-          createdAt: new Date().toISOString(),
-          expiresAt: '',
-        });
+        // 진행률은 rAF로 스로틀 (리렌더 최소화)
+        updateProgress(uploadFile.id, currentProgress, [...uploadedParts]);
+
+        // localStorage 업데이트 (매 10파트마다 또는 마지막 파트)
+        if (partNumber % 10 === 0 || partNumber === totalParts) {
+          saveSession({
+            id: uploadFile.id,
+            sessionId,
+            fileName: uploadFile.file.name,
+            fileSize: uploadFile.file.size,
+            folderId,
+            partSize,
+            totalParts,
+            completedParts: uploadedParts,
+            uploadProgress: currentProgress,
+            createdAt: new Date().toISOString(),
+            expiresAt: '',
+          });
+        }
       }
 
       // 업로드 완료
@@ -510,8 +677,9 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
     } finally {
       abortControllers.current.delete(uploadFile.id);
       pauseFlags.current.delete(uploadFile.id);
+      progressRef.current.delete(uploadFile.id);
     }
-  }, [updateFileState, startSyncPolling]);
+  }, [updateFileState, updateProgress, startSyncPolling, pollQueueUntilReady]);
 
   /**
    * 다중 소용량 파일 업로드 (uploadMany API 사용)
@@ -552,7 +720,7 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
           // 동기화 상태 폴링 시작 (서버 준비 시간 0.3초 대기)
           setTimeout(() => {
             startSyncPolling(uploadFile.id, result.syncEventId, token);
-          }, 300);
+          }, 1000);
         }
       });
     } catch (error) {
@@ -623,6 +791,16 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
       abortControllers.current.set(id, true);
     }
 
+    // 대기열 대기 중인 경우: 대기열 취소 + abort flag 설정 (폴링 루프 탈출)
+    if (uploadFile.status === 'queued' && uploadFile.queueTicket) {
+      abortControllers.current.set(id, true);
+      try {
+        await fileApi.queueCancel(token, uploadFile.queueTicket);
+      } catch (error) {
+        console.error('Failed to cancel queue ticket:', error);
+      }
+    }
+
     // 세션이 있으면 서버에 취소 요청 및 localStorage 정리
     if (uploadFile.sessionId) {
       try {
@@ -644,18 +822,23 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
     // 일시정지 플래그 정리
     pauseFlags.current.delete(id);
 
-    updateFileState(id, { status: 'cancelled' });
+    updateFileState(id, {
+      status: 'cancelled',
+      queueTicket: undefined,
+      queuePosition: undefined,
+      estimatedWaitSeconds: undefined,
+    });
   }, [uploadFiles, updateFileState]);
 
   /**
    * 모든 업로드 취소
+   * Promise.all()로 병렬 실행하여 성능 개선 (async-parallel 규칙)
    */
   const cancelAll = useCallback(async (token: string): Promise<void> => {
-    for (const uploadFile of uploadFiles) {
-      if (uploadFile.status === 'pending' || uploadFile.status === 'uploading' || uploadFile.status === 'paused') {
-        await cancelUpload(uploadFile.id, token);
-      }
-    }
+    const filesToCancel = uploadFiles.filter(
+      (f) => f.status === 'pending' || f.status === 'queued' || f.status === 'uploading' || f.status === 'paused'
+    );
+    await Promise.all(filesToCancel.map((f) => cancelUpload(f.id, token)));
   }, [uploadFiles, cancelUpload]);
 
   /**
@@ -766,46 +949,52 @@ export function useMultipartUpload(): UseMultipartUploadReturn {
   /**
    * localStorage에서 미완료 세션 불러오기 및 상태 복원
    * 서버에서 세션 유효성 확인 후 uploadFiles에 추가
+   * Promise.all()로 병렬 실행하여 성능 개선 (async-parallel 규칙)
    */
   const loadPendingSessions = useCallback(async (token: string): Promise<void> => {
     const storedSessions = getStoredSessions();
 
     if (storedSessions.length === 0) return;
 
-    const validSessions: UploadFile[] = [];
+    // 병렬로 모든 세션 상태 확인
+    const results = await Promise.all(
+      storedSessions.map(async (session) => {
+        try {
+          const status = await fileApi.multipartStatus(token, session.sessionId);
 
-    for (const session of storedSessions) {
-      try {
-        // 서버에서 세션 상태 확인
-        const status = await fileApi.multipartStatus(token, session.sessionId);
-
-        if (status.status === 'INIT' || status.status === 'UPLOADING') {
-          // 유효한 세션 - uploadFiles에 추가 (paused 상태로)
-          validSessions.push({
-            id: session.id,
-            file: null as unknown as File, // 파일은 사용자가 다시 선택해야 함
-            status: 'paused',
-            uploadProgress: status.progress,
-            syncProgress: 0,
-            sessionId: session.sessionId,
-            completedParts: status.completedParts,
-            totalParts: status.totalParts,
-            partSize: session.partSize,
-            folderId: session.folderId,
-          });
-        } else if (status.status === 'COMPLETED') {
-          // 이미 완료됨 - localStorage에서 삭제
+          if (status.status === 'INIT' || status.status === 'UPLOADING') {
+            return {
+              type: 'valid' as const,
+              session: {
+                id: session.id,
+                file: null as unknown as File,
+                status: 'paused' as UploadFileStatus,
+                uploadProgress: status.progress,
+                syncProgress: 0,
+                sessionId: session.sessionId,
+                completedParts: status.completedParts,
+                totalParts: status.totalParts,
+                partSize: session.partSize,
+                folderId: session.folderId,
+              },
+            };
+          } else {
+            // COMPLETED, EXPIRED, ABORTED - localStorage에서 삭제
+            removeStoredSession(session.sessionId);
+            return { type: 'invalid' as const };
+          }
+        } catch (error) {
+          console.error(`Failed to check session ${session.sessionId}:`, error);
           removeStoredSession(session.sessionId);
-        } else {
-          // 만료 또는 취소됨 - localStorage에서 삭제
-          removeStoredSession(session.sessionId);
+          return { type: 'invalid' as const };
         }
-      } catch (error) {
-        // 세션 조회 실패 - localStorage에서 삭제
-        console.error(`Failed to check session ${session.sessionId}:`, error);
-        removeStoredSession(session.sessionId);
-      }
-    }
+      })
+    );
+
+    // 유효한 세션만 필터링
+    const validSessions: UploadFile[] = results
+      .filter((r) => r.type === 'valid')
+      .map((r) => (r as { type: 'valid'; session: UploadFile }).session);
 
     if (validSessions.length > 0) {
       setUploadFiles((prev) => [...prev, ...validSessions]);

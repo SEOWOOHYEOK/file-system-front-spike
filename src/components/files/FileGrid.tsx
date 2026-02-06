@@ -50,10 +50,13 @@ export function FileGrid({
   onSelectionChange,
   isFavorite,
 }: FileGridProps) {
+  // O(1) 조회를 위한 Set 변환 (js-set-map-lookups 규칙)
+  const selectedSet = new Set(selectedItems);
+
   const handleItemClick = (id: string, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey) {
       // Ctrl/Cmd + 클릭: 선택 토글
-      if (selectedItems.includes(id)) {
+      if (selectedSet.has(id)) {
         onSelectionChange(selectedItems.filter(i => i !== id));
       } else {
         onSelectionChange([...selectedItems, id]);
@@ -99,7 +102,7 @@ export function FileGrid({
           name={folder.name}
           type="folder"
           updatedAt={folder.updatedAt}
-          isSelected={selectedItems.includes(folder.id)}
+          isSelected={selectedSet.has(folder.id)}
           isFavorite={isFavorite(folder.id)}
           onClick={(e) => handleItemClick(folder.id, e)}
           onDoubleClick={() => onFolderClick(folder.id)}
@@ -117,7 +120,7 @@ export function FileGrid({
           mimeType={file.mimeType}
           size={file.size}
           updatedAt={file.updatedAt}
-          isSelected={selectedItems.includes(file.id)}
+          isSelected={selectedSet.has(file.id)}
           isFavorite={isFavorite(file.id)}
           onClick={(e) => handleItemClick(file.id, e)}
           onDoubleClick={() => onFileClick(file.id)}
