@@ -23,6 +23,7 @@ import {
   UploadDropzone,
   FileModals,
   TrashView,
+  ShareRequestModal,
 } from '../components/files';
 import type {
   FolderContentsResponse,
@@ -31,6 +32,7 @@ import type {
   FileListItemInFolder,
   TrashListResponse,
   SearchResponse,
+  SearchHistoryItem,
 } from '../types/file.types';
 import type {
   FavoriteResponse,
@@ -97,6 +99,12 @@ export function MyFilesPage() {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchResults, setSearchResults] = useState<SearchResponse | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
+
+  // ============================================
+  // 검색 내역 상태
+  // ============================================
+  const [searchHistory, setSearchHistory] = useState<SearchHistoryItem[]>([]);
+  const [searchHistoryLoading, setSearchHistoryLoading] = useState(false);
 
   // ============================================
   // 정렬 상태
@@ -191,6 +199,12 @@ export function MyFilesPage() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   // ============================================
+  // 공유 요청 모달 상태
+  // ============================================
+  const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [shareFiles, setShareFiles] = useState<Array<{ id: string; name: string }>>([]);
+
+  // ============================================
   // 폴더 API 호출
   // ============================================
   const fetchRootFolder = useCallback(async () => {
@@ -266,6 +280,47 @@ export function MyFilesPage() {
     setSearchResults(null);
     setIsSearchMode(false);
   }, []);
+
+  // ============================================
+  // 검색 내역 API
+  // ============================================
+  const fetchSearchHistory = useCallback(async () => {
+    if (!auth.token) return;
+    setSearchHistoryLoading(true);
+    try {
+      const response = await folderApi.getSearchHistory(auth.token, { pageSize: 20 });
+      setSearchHistory(response.items);
+    } catch (error) {
+      console.error('Failed to fetch search history:', error);
+    } finally {
+      setSearchHistoryLoading(false);
+    }
+  }, [auth.token]);
+
+  const deleteSearchHistoryItem = useCallback(async (historyId: string) => {
+    if (!auth.token) return;
+    try {
+      await folderApi.deleteSearchHistory(auth.token, historyId);
+      setSearchHistory((prev) => prev.filter((item) => item.id !== historyId));
+    } catch (error) {
+      console.error('Failed to delete search history item:', error);
+    }
+  }, [auth.token]);
+
+  const deleteAllSearchHistory = useCallback(async () => {
+    if (!auth.token) return;
+    try {
+      await folderApi.deleteAllSearchHistory(auth.token);
+      setSearchHistory([]);
+    } catch (error) {
+      console.error('Failed to delete all search history:', error);
+    }
+  }, [auth.token]);
+
+  const selectSearchHistory = useCallback((keyword: string) => {
+    setSearchKeyword(keyword);
+    handleSearch(keyword);
+  }, [handleSearch]);
 
   // ============================================
   // 폴더 생성
@@ -576,6 +631,12 @@ export function MyFilesPage() {
           handleAddFavorite(item.type === 'folder' ? 'FOLDER' : 'FILE', item.id);
         }
         break;
+      case 'share':
+        if (item.type === 'file') {
+          setShareFiles([{ id: item.id, name: item.name }]);
+          setIsShareModalOpen(true);
+        }
+        break;
       case 'delete':
         setTargetItem(item);
         setActiveModal('delete');
@@ -725,7 +786,37 @@ export function MyFilesPage() {
           sortOrder={sortOrder}
           onSortChange={handleSortChange}
           disabled={currentView !== 'all'}
+          searchHistory={searchHistory}
+          searchHistoryLoading={searchHistoryLoading}
+          onFetchSearchHistory={fetchSearchHistory}
+          onDeleteSearchHistory={deleteSearchHistoryItem}
+          onDeleteAllSearchHistory={deleteAllSearchHistory}
+          onSelectSearchHistory={selectSearchHistory}
         />
+
+        {/* 선택된 파일 액션 바 */}
+        {selectedItems.length > 0 && selectedItems.some(s => s.type === 'file') && currentView === 'all' && (
+          <div className="bg-blue-50 border-b border-blue-200 px-6 py-2 flex items-center justify-between">
+            <span className="text-sm text-blue-800">
+              {selectedItems.filter(s => s.type === 'file').length}개 파일 선택됨
+            </span>
+            <button
+              onClick={() => {
+                const fileItems = selectedItems
+                  .filter(s => s.type === 'file')
+                  .map(s => ({ id: s.id, name: s.name }));
+                if (fileItems.length > 0) {
+                  setShareFiles(fileItems);
+                  setIsShareModalOpen(true);
+                }
+              }}
+              className="flex items-center px-3 py-1.5 text-sm text-white bg-blue-500 hover:bg-blue-600 rounded-lg"
+            >
+              <span className="mr-1.5">📨</span>
+              공유 요청
+            </button>
+          </div>
+        )}
 
         {/* 브레드크럼 (파일 뷰에서만) */}
         {currentView === 'all' && !isSearchMode && (
@@ -1135,6 +1226,17 @@ export function MyFilesPage() {
         onClearCompleted={clearCompletedUploads}
         isUploading={isUploading}
         disabled={!auth.token || !currentFolderId}
+      />
+
+      {/* 공유 요청 모달 */}
+      <ShareRequestModal
+        isOpen={isShareModalOpen}
+        onClose={() => {
+          setIsShareModalOpen(false);
+          setShareFiles([]);
+        }}
+        token={auth.token || ''}
+        files={shareFiles}
       />
     </div>
   );

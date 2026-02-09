@@ -9,7 +9,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/v1': {
-        target: 'http://localhost:3200',
+        target: 'http://localhost:3000',
         changeOrigin: true,
         timeout: 600000,        // 프록시 타임아웃 10분 (대용량 파트 업로드)
         configure: (proxy) => {

@@ -157,6 +157,61 @@ export const adminSystemApi = {
 };
 
 // ============================================
+// 500.관리자 - Observability (NAS 모니터링)
+// ============================================
+
+import type {
+  ObservabilityCurrent,
+  ObservabilityHistory,
+  ObservabilitySettings,
+  UpdateObservabilitySettings,
+} from '../types/observability';
+
+export const observabilityApi = {
+  /**
+   * 현재 NAS 상태 조회
+   * GET /v1/admin/observability/current
+   */
+  getCurrent: (token: string): Promise<ObservabilityCurrent> =>
+    apiCall<ObservabilityCurrent>('GET', '/admin/observability/current', token),
+
+  /**
+   * 상태 이력 조회
+   * GET /v1/admin/observability/history?hours=24
+   */
+  getHistory: (token: string, hours = 24): Promise<ObservabilityHistory> =>
+    apiCall<ObservabilityHistory>(
+      'GET',
+      '/admin/observability/history',
+      token,
+      undefined,
+      { hours }
+    ),
+
+  /**
+   * 설정 조회
+   * GET /v1/admin/observability/settings
+   */
+  getSettings: (token: string): Promise<ObservabilitySettings> =>
+    apiCall<ObservabilitySettings>('GET', '/admin/observability/settings', token),
+
+  /**
+   * 설정 변경 (부분 업데이트)
+   * PUT /v1/admin/observability/settings
+   */
+  updateSettings: (
+    token: string,
+    data: UpdateObservabilitySettings
+  ): Promise<ObservabilitySettings> =>
+    apiCall<ObservabilitySettings>(
+      'PUT',
+      '/admin/observability/settings',
+      token,
+      data
+    ),
+};
+
+// ============================================
 // 510.관리자-공유 (Admin Share Management)
 // ============================================
 

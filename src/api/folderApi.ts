@@ -17,6 +17,8 @@ import type {
   FileApiLogEntry,
   SearchQuery,
   SearchResponse,
+  SearchHistoryResponse,
+  DeleteAllSearchHistoryResponse,
 } from '../types/file.types';
 
 const api = axios.create({
@@ -168,6 +170,40 @@ export const folderApi = {
    */
   search: (token: string, query: SearchQuery): Promise<SearchResponse> =>
     apiCall<SearchResponse>('GET', '/folders/search', token, undefined, query as unknown as Record<string, unknown>),
+
+  // ============================================
+  // 검색 내역 API
+  // ============================================
+
+  /**
+   * 검색 내역 조회
+   * GET /v1/folders/search/history
+   */
+  getSearchHistory: (
+    token: string,
+    params?: { page?: number; pageSize?: number }
+  ): Promise<SearchHistoryResponse> =>
+    apiCall<SearchHistoryResponse>(
+      'GET',
+      '/folders/search/history',
+      token,
+      undefined,
+      params as Record<string, unknown>
+    ),
+
+  /**
+   * 검색 내역 단건 삭제
+   * DELETE /v1/folders/search/history/:historyId
+   */
+  deleteSearchHistory: (token: string, historyId: string): Promise<void> =>
+    apiCall<void>('DELETE', `/folders/search/history/${historyId}`, token),
+
+  /**
+   * 검색 내역 전체 삭제
+   * DELETE /v1/folders/search/history
+   */
+  deleteAllSearchHistory: (token: string): Promise<DeleteAllSearchHistoryResponse> =>
+    apiCall<DeleteAllSearchHistoryResponse>('DELETE', '/folders/search/history', token),
 };
 
 export default folderApi;

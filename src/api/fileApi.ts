@@ -44,7 +44,7 @@ const api = axios.create({
  * 멀티파트 파트 업로드만 백엔드에 직접 요청하여 프록시를 우회.
  */
 const UPLOAD_API_BASE = import.meta.env.DEV
-  ? (import.meta.env.VITE_API_URL || 'http://localhost:3200') + '/v1'
+  ? (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/v1'
   : '/v1';
 
 // API 로그 콜백

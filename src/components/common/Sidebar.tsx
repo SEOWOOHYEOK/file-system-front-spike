@@ -30,6 +30,16 @@ const navItems = [
     icon: '👥',
   },
   {
+    title: '공유 요청 관리',
+    path: '/admin/share-requests',
+    icon: '📨',
+  },
+  {
+    title: 'NAS 관리',
+    path: '/admin/observability',
+    icon: '📊',
+  },
+  {
     title: '600.외부공유',
     path: '/shares',
     icon: '🔗',

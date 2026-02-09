@@ -797,6 +797,36 @@ export interface SearchResponse {
 }
 
 // ============================================
+// 검색 내역 (Search History)
+// ============================================
+
+/**
+ * 검색 내역 아이템
+ */
+export interface SearchHistoryItem {
+  id: string;
+  keyword: string;
+  searchedAt: string;
+}
+
+/**
+ * 검색 내역 조회 응답
+ */
+export interface SearchHistoryResponse {
+  items: SearchHistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+/**
+ * 검색 내역 전체 삭제 응답
+ */
+export interface DeleteAllSearchHistoryResponse {
+  deletedCount: number;
+}
+
+// ============================================
 // 250.동기화 (Sync Event)
 // ============================================
 
