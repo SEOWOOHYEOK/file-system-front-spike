@@ -71,6 +71,11 @@ export {
 } from './externalShareApi';
 
 // ============================================
+// 동기화 대시보드 (Sync Dashboard)
+// ============================================
+export { syncDashboardApi, setSyncDashboardLogCallback } from './syncDashboardApi';
+
+// ============================================
 // Default Export (통합 API 객체)
 // ============================================
 import { authApi, adminSystemApi, adminShareApi, adminExternalUserApi, fileShareApi } from './adminApi';
@@ -80,6 +85,7 @@ import { trashApi } from './trashApi';
 import { userApi } from './userApi';
 import { roleApi } from './roleApi';
 import { externalShareApi } from './externalShareApi';
+import { syncDashboardApi } from './syncDashboardApi';
 
 export const api = {
   // 100.인증
@@ -114,6 +120,9 @@ export const api = {
 
   // 700.외부인증 & 710.외부접근
   externalShare: externalShareApi,
+
+  // 동기화 대시보드
+  syncDashboard: syncDashboardApi,
 };
 
 export default api;

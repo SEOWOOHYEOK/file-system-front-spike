@@ -14,6 +14,7 @@ import { SharePage } from './pages/SharePage';
 import { ExternalPage } from './pages/ExternalPage';
 import { AdminShareRequestPage } from './pages/AdminShareRequestPage';
 import { UserManagementPage } from './pages/UserManagementPage';
+import { SyncDashboardPage } from './pages/SyncDashboardPage';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
           <Route path="admin/observability" element={<ObservabilityPage />} />
           <Route path="admin/share-requests" element={<AdminShareRequestPage />} />
           <Route path="admin/user-management" element={<UserManagementPage />} />
+          <Route path="admin/sync-dashboard" element={<SyncDashboardPage />} />
           <Route path="shares" element={<SharePage />} />
           <Route path="external" element={<ExternalPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />

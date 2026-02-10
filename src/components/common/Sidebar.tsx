@@ -45,6 +45,11 @@ const navItems = [
     icon: '📊',
   },
   {
+    title: '동기화 대시보드',
+    path: '/admin/sync-dashboard',
+    icon: '🔄',
+  },
+  {
     title: '600.외부공유',
     path: '/shares',
     icon: '🔗',
