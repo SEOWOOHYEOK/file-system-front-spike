@@ -35,6 +35,11 @@ const navItems = [
     icon: '📨',
   },
   {
+    title: '사용자관리',
+    path: '/admin/user-management',
+    icon: '👤',
+  },
+  {
     title: 'NAS 관리',
     path: '/admin/observability',
     icon: '📊',

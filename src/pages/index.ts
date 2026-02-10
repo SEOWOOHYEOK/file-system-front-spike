@@ -6,3 +6,4 @@ export { AdminExternalUserPage } from './AdminExternalUserPage';
 export { SharePage } from './SharePage';
 export { ExternalPage } from './ExternalPage';
 export { AdminShareRequestPage } from './AdminShareRequestPage';
+export { UserManagementPage } from './UserManagementPage';
