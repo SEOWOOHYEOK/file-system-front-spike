@@ -37,7 +37,7 @@ import type {
 import type {
   FavoriteResponse,
   FavoriteTargetType,
-  RecentActivitiesResponse,
+  RecentActivityItem,
 } from '../types/user.types';
 
 // 뷰 타입
@@ -139,9 +139,16 @@ export function MyFilesPage() {
   const [favorites, setFavorites] = useState<FavoriteResponse[]>([]);
 
   // ============================================
-  // 최근 활동 상태
+  // 최근 활동 상태 (무한 스크롤 + 필터)
   // ============================================
-  const [recentActivities, setRecentActivities] = useState<RecentActivitiesResponse | null>(null);
+  const [recentActivities, setRecentActivities] = useState<RecentActivityItem[]>([]);
+  const [recentHasNext, setRecentHasNext] = useState(true);
+  const [recentLoading, setRecentLoading] = useState(false);
+  const [recentTotalItems, setRecentTotalItems] = useState(0);
+  const recentPageRef = useRef(1);
+  const recentObserverRef = useRef<HTMLDivElement>(null);
+  type RecentFilterTab = 'all' | 'view' | 'upload' | 'download';
+  const [recentFilter, setRecentFilter] = useState<RecentFilterTab>('all');
 
   // ============================================
   // 스토리지 정보
@@ -561,17 +568,100 @@ export function MyFilesPage() {
   }, [auth.token, fetchTrashList]);
 
   // ============================================
-  // 최근 활동
+  // 최근 활동 (무한 스크롤)
   // ============================================
-  const fetchRecentActivities = useCallback(async () => {
-    if (!auth.token) return;
+
+  // 필터 탭 → actions 파라미터 매핑
+  const getActionsParam = useCallback((filter: RecentFilterTab): string | undefined => {
+    switch (filter) {
+      case 'view': return 'FILE_VIEW';
+      case 'upload': return 'FILE_UPLOAD';
+      case 'download': return 'FILE_DOWNLOAD';
+      default: return undefined;
+    }
+  }, []);
+
+  // 데이터 로드 (append mode)
+  const loadRecentActivities = useCallback(async (page: number, append: boolean = false) => {
+    if (!auth.token || recentLoading) return;
+    setRecentLoading(true);
     try {
-      const response = await userApi.getRecentActivities(auth.token, { limit: 50 });
-      setRecentActivities(response);
+      const actions = getActionsParam(recentFilter);
+      const response = await userApi.getRecentActivities(auth.token, {
+        page,
+        pageSize: 20,
+        ...(actions ? { actions } : {}),
+      });
+      if (append) {
+        setRecentActivities((prev) => [...prev, ...response.items]);
+      } else {
+        setRecentActivities(response.items);
+      }
+      setRecentHasNext(response.hasNext);
+      setRecentTotalItems(response.totalItems);
+      recentPageRef.current = page;
     } catch (error) {
       console.error('Failed to fetch recent activities:', error);
+    } finally {
+      setRecentLoading(false);
     }
-  }, [auth.token]);
+  }, [auth.token, recentFilter, recentLoading, getActionsParam]);
+
+  // 더 불러오기
+  const loadMoreRecentActivities = useCallback(() => {
+    if (recentLoading || !recentHasNext) return;
+    loadRecentActivities(recentPageRef.current + 1, true);
+  }, [recentLoading, recentHasNext, loadRecentActivities]);
+
+  // 초기 로드 / 필터 변경 시 리셋
+  const fetchRecentActivities = useCallback(async () => {
+    recentPageRef.current = 1;
+    setRecentActivities([]);
+    setRecentHasNext(true);
+    setRecentTotalItems(0);
+    // loadRecentActivities는 recentFilter에 의존하므로 직접 호출
+    if (!auth.token) return;
+    setRecentLoading(true);
+    try {
+      const actions = getActionsParam(recentFilter);
+      const response = await userApi.getRecentActivities(auth.token, {
+        page: 1,
+        pageSize: 20,
+        ...(actions ? { actions } : {}),
+      });
+      setRecentActivities(response.items);
+      setRecentHasNext(response.hasNext);
+      setRecentTotalItems(response.totalItems);
+      recentPageRef.current = 1;
+    } catch (error) {
+      console.error('Failed to fetch recent activities:', error);
+    } finally {
+      setRecentLoading(false);
+    }
+  }, [auth.token, recentFilter, getActionsParam]);
+
+  // 필터 변경 시 리셋 & 재조회
+  useEffect(() => {
+    if (currentView === 'recent') {
+      fetchRecentActivities();
+    }
+  }, [recentFilter]);
+
+  // Intersection Observer (무한 스크롤)
+  useEffect(() => {
+    if (currentView !== 'recent') return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && recentHasNext && !recentLoading) {
+          loadMoreRecentActivities();
+        }
+      },
+      { threshold: 0.1 },
+    );
+    const el = recentObserverRef.current;
+    if (el) observer.observe(el);
+    return () => observer.disconnect();
+  }, [currentView, recentHasNext, recentLoading, loadMoreRecentActivities]);
 
   // ============================================
   // 스토리지 정보
@@ -1043,46 +1133,155 @@ export function MyFilesPage() {
           {/* 최근 활동 뷰 */}
           {currentView === 'recent' && (
             <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-gray-900">최근 활동</h2>
-              {recentActivities && recentActivities.activities.length > 0 ? (
+              {/* 헤더 + 총 건수 */}
+              <div className="flex items-center justify-between">
+                <h2 className="text-lg font-semibold text-gray-900">최근 활동</h2>
+                {recentTotalItems > 0 && (
+                  <span className="text-sm text-gray-500">총 {recentTotalItems.toLocaleString()}건</span>
+                )}
+              </div>
+
+              {/* 필터 탭 */}
+              <div className="flex space-x-1 bg-gray-100 rounded-lg p-1 w-fit">
+                {([
+                  { key: 'all' as RecentFilterTab, label: '전체' },
+                  { key: 'view' as RecentFilterTab, label: '열람' },
+                  { key: 'upload' as RecentFilterTab, label: '업로드' },
+                  { key: 'download' as RecentFilterTab, label: '다운로드' },
+                ]).map((tab) => (
+                  <button
+                    key={tab.key}
+                    onClick={() => setRecentFilter(tab.key)}
+                    className={`px-4 py-1.5 text-sm rounded-md transition-colors ${
+                      recentFilter === tab.key
+                        ? 'bg-white text-gray-900 shadow-sm font-medium'
+                        : 'text-gray-600 hover:text-gray-900'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* 활동 목록 테이블 */}
+              {recentActivities.length > 0 ? (
                 <div className="bg-white rounded-lg shadow overflow-hidden">
                   <table className="min-w-full">
                     <thead className="bg-gray-50">
                       <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">활동</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">대상</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">경로</th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">일시</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">활동</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">유형</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">대상</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">경로</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">결과</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">일시</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-200">
-                      {recentActivities.activities.map((activity, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50">
-                          <td className="px-4 py-3 text-sm">
-                            <span className={`px-2 py-1 rounded text-xs ${
-                              activity.actionCategory === 'CREATE' ? 'bg-green-100 text-green-800' :
-                              activity.actionCategory === 'DELETE' ? 'bg-red-100 text-red-800' :
-                              activity.actionCategory === 'UPDATE' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-gray-100 text-gray-800'
-                            }`}>
-                              {activity.action}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-sm">{activity.targetName || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500 truncate max-w-xs">{activity.targetPath || '-'}</td>
-                          <td className="px-4 py-3 text-sm text-gray-500">
-                            {new Date(activity.createdAt).toLocaleString()}
-                          </td>
-                        </tr>
-                      ))}
+                      {recentActivities.map((activity, idx) => {
+                        // 액션별 스타일 매핑
+                        const actionStyleMap: Record<string, { bg: string; text: string; label: string }> = {
+                          FILE_VIEW:       { bg: 'bg-blue-100', text: 'text-blue-800', label: '조회' },
+                          FILE_DOWNLOAD:   { bg: 'bg-indigo-100', text: 'text-indigo-800', label: '다운로드' },
+                          FILE_UPLOAD:     { bg: 'bg-green-100', text: 'text-green-800', label: '업로드' },
+                          FILE_RENAME:     { bg: 'bg-yellow-100', text: 'text-yellow-800', label: '이름변경' },
+                          FILE_MOVE:       { bg: 'bg-orange-100', text: 'text-orange-800', label: '이동' },
+                          FILE_DELETE:     { bg: 'bg-red-100', text: 'text-red-800', label: '삭제' },
+                          FILE_RESTORE:    { bg: 'bg-emerald-100', text: 'text-emerald-800', label: '복원' },
+                          FILE_PURGE:      { bg: 'bg-red-200', text: 'text-red-900', label: '영구삭제' },
+                          FOLDER_CREATE:   { bg: 'bg-teal-100', text: 'text-teal-800', label: '폴더생성' },
+                          FOLDER_VIEW:     { bg: 'bg-blue-100', text: 'text-blue-800', label: '폴더조회' },
+                          FOLDER_RENAME:   { bg: 'bg-yellow-100', text: 'text-yellow-800', label: '폴더이름변경' },
+                          FOLDER_MOVE:     { bg: 'bg-orange-100', text: 'text-orange-800', label: '폴더이동' },
+                          FOLDER_DELETE:   { bg: 'bg-red-100', text: 'text-red-800', label: '폴더삭제' },
+                        };
+                        const style = actionStyleMap[activity.action] || { bg: 'bg-gray-100', text: 'text-gray-800', label: activity.action };
+
+                        return (
+                          <tr key={`${activity.targetId}-${idx}`} className="hover:bg-gray-50 transition-colors">
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${style.bg} ${style.text}`}>
+                                {style.label}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className="text-gray-600">
+                                {activity.targetType === 'FOLDER' ? '📁 폴더' : '📄 파일'}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                              {activity.targetName || '-'}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-500 truncate max-w-xs" title={activity.targetPath || ''}>
+                              {activity.targetPath || '-'}
+                            </td>
+                            <td className="px-4 py-3 text-sm">
+                              {activity.result === 'SUCCESS' ? (
+                                <span className="inline-flex items-center text-green-600">
+                                  <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                  </svg>
+                                  성공
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center text-red-600">
+                                  <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                                  </svg>
+                                  실패
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+                              {new Date(activity.createdAt).toLocaleString('ko-KR', {
+                                year: 'numeric',
+                                month: '2-digit',
+                                day: '2-digit',
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
+
+                  {/* 무한 스크롤 로딩 인디케이터 */}
+                  {recentLoading && (
+                    <div className="flex items-center justify-center py-4 border-t">
+                      <svg className="animate-spin h-5 w-5 text-blue-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      <span className="text-sm text-gray-500">불러오는 중...</span>
+                    </div>
+                  )}
+
+                  {/* 더 이상 데이터 없음 */}
+                  {!recentHasNext && recentActivities.length > 0 && (
+                    <div className="text-center py-3 border-t text-sm text-gray-400">
+                      모든 활동 내역을 불러왔습니다
+                    </div>
+                  )}
+                </div>
+              ) : !recentLoading ? (
+                <div className="text-center text-gray-500 py-12">
+                  <div className="text-4xl mb-3">📋</div>
+                  <p>최근 활동이 없습니다</p>
                 </div>
               ) : (
-                <div className="text-center text-gray-500 py-12">
-                  최근 활동이 없습니다
+                <div className="flex items-center justify-center py-12">
+                  <svg className="animate-spin h-6 w-6 text-blue-500 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                  </svg>
+                  <span className="text-gray-500">활동 내역을 불러오는 중...</span>
                 </div>
               )}
+
+              {/* Intersection Observer 감지용 엘리먼트 */}
+              <div ref={recentObserverRef} style={{ height: 1 }} />
             </div>
           )}
         </div>

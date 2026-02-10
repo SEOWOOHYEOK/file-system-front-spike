@@ -192,38 +192,79 @@ export interface GetFavoritesQuery {
 }
 
 // ============================================
-// 310.최근 활동 (Recent Activities)
+// 310.최근 활동 - 사용자 활동 내역 (Audit Log)
 // ============================================
 
 /**
- * 최근 활동 조회 쿼리
+ * 허용되는 파일/폴더 액션
  */
-export interface RecentActivitiesQuery {
-  limit?: number;
-  actions?: string;
+export type AuditAction =
+  // 파일 관련
+  | 'FILE_VIEW'       // 파일 조회
+  | 'FILE_DOWNLOAD'   // 파일 다운로드
+  | 'FILE_UPLOAD'     // 파일 업로드
+  | 'FILE_RENAME'     // 파일 이름 변경
+  | 'FILE_MOVE'       // 파일 이동
+  | 'FILE_DELETE'     // 파일 삭제 (휴지통 이동)
+  | 'FILE_RESTORE'    // 파일 복원
+  | 'FILE_PURGE'      // 파일 영구 삭제
+  // 폴더 관련
+  | 'FOLDER_CREATE'   // 폴더 생성
+  | 'FOLDER_VIEW'     // 폴더 조회
+  | 'FOLDER_RENAME'   // 폴더 이름 변경
+  | 'FOLDER_MOVE'     // 폴더 이동
+  | 'FOLDER_DELETE';  // 폴더 삭제
+
+/**
+ * 공통 페이지네이션 응답
+ */
+export interface PaginatedResponse<T> {
+  items: T[];
+  page: number;        // 현재 페이지 (1부터 시작)
+  pageSize: number;    // 페이지 크기
+  totalItems: number;  // 전체 아이템 수
+  totalPages: number;  // 전체 페이지 수
+  hasNext: boolean;    // 다음 페이지 존재 여부
+  hasPrev: boolean;    // 이전 페이지 존재 여부
 }
 
 /**
- * 활동 아이템
+ * 활동 내역 항목
  */
-export interface ActivityItem {
-  action: string;
+export interface RecentActivityItem {
+  /** 액션 타입 (AuditAction enum 값) */
+  action: AuditAction;
+  /** 액션 카테고리: 'FILE' | 'FOLDER' */
   actionCategory: string;
+  /** 대상 타입: 'FILE' | 'FOLDER' */
   targetType: string;
+  /** 대상 ID (UUID) */
   targetId: string;
+  /** 대상 이름 (파일명 또는 폴더명) */
   targetName: string;
+  /** 대상 경로 (선택) */
   targetPath?: string;
+  /** 결과: 'SUCCESS' | 'FAILURE' */
   result: string;
+  /** 활동 시각 (ISO 8601) */
   createdAt: string;
 }
 
 /**
- * 최근 활동 응답
+ * 활동 내역 응답 타입
  */
-export interface RecentActivitiesResponse {
-  userId: string;
-  activities: ActivityItem[];
-  total: number;
+export type RecentActivitiesResponse = PaginatedResponse<RecentActivityItem>;
+
+/**
+ * 최근 활동 조회 쿼리 파라미터
+ */
+export interface RecentActivitiesQuery {
+  /** 페이지 번호 (기본: 1, 최소: 1) */
+  page?: number;
+  /** 페이지 크기 (기본: 20, 최소: 1, 최대: 100) */
+  pageSize?: number;
+  /** 필터할 액션 (쉼표 구분, 선택) */
+  actions?: string;
 }
 
 // ============================================

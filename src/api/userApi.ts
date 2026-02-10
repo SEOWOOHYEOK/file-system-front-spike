@@ -176,8 +176,9 @@ export const userApi = {
     ),
 
   /**
-   * 최근 활동 조회
-   * GET /v1/users/favorites/recent-activities
+   * 사용자 활동 내역 조회 (Audit Log)
+   * GET /v1/users/audit-log
+   * 페이지네이션 + 액션 필터 지원
    */
   getRecentActivities: (
     token: string,
@@ -185,7 +186,7 @@ export const userApi = {
   ): Promise<RecentActivitiesResponse> =>
     apiCall<RecentActivitiesResponse>(
       'GET',
-      '/users/favorites/recent-activities',
+      '/users/audit-log',
       token,
       undefined,
       query as Record<string, unknown>
