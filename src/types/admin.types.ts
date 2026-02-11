@@ -1,44 +1,10 @@
 /**
  * Admin API 타입 정의
- * 100.인증, 500.관리자, 510.관리자-공유, 520.관리자-외부사용자, 600.외부공유
+ * 500.관리자, 510.관리자-공유, 520.관리자-외부사용자, 600.외부공유
+ *
+ * 참고: 100.인증 타입은 auth.types.ts로 분리되었습니다.
+ * 하위 호환: InternalUser, SSOToken, InternalAuthState는 useInternalAuth.ts에서 re-export됩니다.
  */
-
-// ============================================
-// 100.인증 (Internal SSO Auth)
-// ============================================
-
-export interface InternalUser {
-  id: string;
-  employeeNumber: string;
-  name: string;
-  email: string;
-}
-
-export interface SSOToken {
-  accessToken: string;
-  refreshToken: string;
-}
-
-export interface LoginResponse {
-  success: boolean;
-  token: string;
-  user: InternalUser;
-  ssoToken: SSOToken;
-}
-
-export interface RefreshTokenResponse {
-  success: boolean;
-  token: string;
-  user: InternalUser;
-  ssoToken: SSOToken;
-}
-
-export interface InternalAuthState {
-  isAuthenticated: boolean;
-  token: string | null;
-  user: InternalUser | null;
-  ssoToken: SSOToken | null;
-}
 
 // ============================================
 // 500.관리자 (Admin System)

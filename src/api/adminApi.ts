@@ -1,11 +1,11 @@
 /**
  * Admin API Client
- * 100.인증, 500.관리자, 510.관리자-공유, 520.관리자-외부사용자, 600.외부공유
+ * 500.관리자, 510.관리자-공유, 520.관리자-외부사용자, 600.외부공유
+ *
+ * 참고: 100.인증은 authApi.ts로 분리되었습니다.
  */
 import axios, { AxiosError } from 'axios';
 import type {
-  LoginResponse,
-  RefreshTokenResponse,
   CacheHealthResponse,
   NasHealthResponse,
   StorageConsistencyQuery,
@@ -97,24 +97,6 @@ async function apiCall<T>(
     throw error;
   }
 }
-
-// ============================================
-// 100.인증 (Internal SSO Auth)
-// ============================================
-
-export const authApi = {
-  /**
-   * SSO 로그인
-   */
-  login: (email: string, password: string): Promise<LoginResponse> =>
-    apiCall<LoginResponse>('POST', '/auth/login', undefined, { email, password }),
-
-  /**
-   * SSO 토큰 갱신
-   */
-  refreshToken: (refreshToken: string): Promise<RefreshTokenResponse> =>
-    apiCall<RefreshTokenResponse>('POST', '/auth/refresh-token', undefined, { refreshToken }),
-};
 
 // ============================================
 // 500.관리자 (Admin System)
@@ -357,7 +339,6 @@ export const fileShareApi = {
 
 // Export all APIs
 export const adminApi = {
-  auth: authApi,
   system: adminSystemApi,
   share: adminShareApi,
   externalUser: adminExternalUserApi,

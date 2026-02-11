@@ -5,9 +5,14 @@
  */
 
 // ============================================
+// 공유 API 클라이언트 (인터셉터 포함)
+// ============================================
+export { default as apiClient, tokenStorage } from './apiClient';
+
+// ============================================
 // 100.인증 (Auth)
 // ============================================
-export { authApi, setAdminLogCallback } from './adminApi';
+export { authApi } from './authApi';
 
 // ============================================
 // 200.파일 (File)
@@ -37,7 +42,7 @@ export { roleApi, setRoleLogCallback } from './roleApi';
 // ============================================
 // 500.관리자 (Admin System)
 // ============================================
-export { adminSystemApi } from './adminApi';
+export { adminSystemApi, setAdminLogCallback } from './adminApi';
 
 // ============================================
 // 510.관리자-공유 (Admin Share)
@@ -78,7 +83,8 @@ export { syncDashboardApi, setSyncDashboardLogCallback } from './syncDashboardAp
 // ============================================
 // Default Export (통합 API 객체)
 // ============================================
-import { authApi, adminSystemApi, adminShareApi, adminExternalUserApi, fileShareApi } from './adminApi';
+import { authApi } from './authApi';
+import { adminSystemApi, adminShareApi, adminExternalUserApi, fileShareApi } from './adminApi';
 import { fileApi } from './fileApi';
 import { folderApi } from './folderApi';
 import { trashApi } from './trashApi';

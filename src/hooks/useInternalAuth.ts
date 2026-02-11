@@ -1,118 +1,100 @@
 /**
- * useInternalAuth - 내부 SSO 인증 훅 (500~600 API용)
+ * useInternalAuth - 내부 SSO 인증 훅 (하위 호환 래퍼)
+ *
+ * AuthContext를 기반으로 기존 인터페이스를 유지합니다.
+ * 모든 페이지에서 기존 auth.token, auth.user, auth.isAuthenticated 패턴을
+ * 변경 없이 사용할 수 있습니다.
  */
-import { useState, useCallback, useEffect } from 'react';
-import { authApi } from '../api/adminApi';
-import type { InternalAuthState, InternalUser, SSOToken } from '../types/admin.types';
+import { useMemo } from 'react';
+import { useAuthContext } from '../contexts/AuthContext';
+import type { LoginResponse } from '../types/auth.types';
 
-const STORAGE_KEY = 'dms_internal_auth';
+/** 하위 호환용 내부 사용자 타입 */
+export interface InternalUser {
+  id: string;
+  employeeNumber: string;
+  name: string;
+  email: string;
+}
 
-interface StoredAuth {
-  token: string;
-  user: InternalUser;
-  ssoToken: SSOToken;
+/** 하위 호환용 SSO 토큰 타입 */
+export interface SSOToken {
+  accessToken: string;
+  refreshToken: string;
+}
+
+/** 하위 호환용 인증 상태 */
+export interface InternalAuthState {
+  isAuthenticated: boolean;
+  /** 액세스 토큰 (API 호출용) */
+  token: string | null;
+  /** 사용자 정보 */
+  user: InternalUser | null;
+  /** SSO 토큰 (accessToken + refreshToken) */
+  ssoToken: SSOToken | null;
 }
 
 export function useInternalAuth() {
-  const [auth, setAuth] = useState<InternalAuthState>({
-    isAuthenticated: false,
-    token: null,
-    user: null,
-    ssoToken: null,
-  });
-  const [isLoading, setIsLoading] = useState(false);
+  const { auth, login: contextLogin, logout: contextLogout, refresh: contextRefresh, isLoading } = useAuthContext();
 
-  // 로컬 스토리지에서 인증 정보 복원
-  useEffect(() => {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored) {
-      try {
-        const parsed: StoredAuth = JSON.parse(stored);
-        setAuth({
-          isAuthenticated: true,
-          token: parsed.token,
-          user: parsed.user,
-          ssoToken: parsed.ssoToken,
-        });
-      } catch {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-    }
-  }, []);
+  // 하위 호환 형태로 매핑
+  const compatAuth: InternalAuthState = useMemo(() => ({
+    isAuthenticated: auth.isAuthenticated,
+    token: auth.accessToken,
+    user: auth.user
+      ? {
+          id: auth.user.id,
+          employeeNumber: auth.user.employeeNumber,
+          name: auth.user.name || '',
+          email: auth.user.email || '',
+        }
+      : null,
+    ssoToken: auth.accessToken && auth.refreshToken
+      ? {
+          accessToken: auth.accessToken,
+          refreshToken: auth.refreshToken,
+        }
+      : null,
+  }), [auth]);
 
-  // 로그인
-  const login = useCallback(async (email: string, password: string) => {
-    setIsLoading(true);
-    try {
-      const response = await authApi.login(email, password);
-      
-      const newAuth: InternalAuthState = {
-        isAuthenticated: true,
-        token: response.token,
-        user: response.user,
-        ssoToken: response.ssoToken,
-      };
-      
-      setAuth(newAuth);
-      
-      // 로컬 스토리지에 저장
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        token: response.token,
-        user: response.user,
-        ssoToken: response.ssoToken,
-      }));
-      
-      return response;
-    } finally {
-      setIsLoading(false);
-    }
-  }, []);
+  // 하위 호환 login: 기존 LoginResponse 형태로 반환
+  const login = async (email: string, password: string) => {
+    const data: LoginResponse = await contextLogin(email, password);
+    return {
+      success: data.success,
+      token: data.accessToken,
+      user: {
+        id: data.user.id,
+        employeeNumber: data.user.employeeNumber,
+        name: data.user.name || '',
+        email: data.user.email || '',
+      },
+      ssoToken: {
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+      },
+    };
+  };
 
-  // 로그아웃
-  const logout = useCallback(() => {
-    setAuth({
-      isAuthenticated: false,
-      token: null,
-      user: null,
-      ssoToken: null,
-    });
-    localStorage.removeItem(STORAGE_KEY);
-  }, []);
+  const logout = async () => {
+    await contextLogout();
+  };
 
-  // 토큰 갱신
-  const refresh = useCallback(async () => {
-    if (!auth.ssoToken?.refreshToken) {
-      throw new Error('No refresh token available');
-    }
-    
-    setIsLoading(true);
-    try {
-      const response = await authApi.refreshToken(auth.ssoToken.refreshToken);
-      
-      const newAuth: InternalAuthState = {
-        isAuthenticated: true,
-        token: response.token,
-        user: response.user,
-        ssoToken: response.ssoToken,
-      };
-      
-      setAuth(newAuth);
-      
-      // 로컬 스토리지 업데이트
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        token: response.token,
-        user: response.user,
-        ssoToken: response.ssoToken,
-      }));
-      
-      return response;
-    } finally {
-      setIsLoading(false);
-    }
-  }, [auth.ssoToken?.refreshToken]);
+  const refresh = async () => {
+    const data = await contextRefresh();
+    return {
+      success: data.success,
+      token: data.accessToken,
+      user: compatAuth.user!,
+      ssoToken: {
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+      },
+    };
+  };
 
   return {
-    auth,
+    auth: compatAuth,
     login,
     logout,
     refresh,
