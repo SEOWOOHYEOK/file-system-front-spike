@@ -368,7 +368,25 @@ export interface ShareRequestResponse {
   requestedAt: string;
 }
 
-// ─── 701. 응답 타입 ───
+// ─── 701-A. 내가 보낸 결제 요청 (ShareRequest) ───
+
+/** 내가 보낸 결제 요청 목록 아이템 (701-A) */
+export interface MySentShareRequestItem {
+  /** 항목 출처 (항상 'SHARE_REQUEST') */
+  source: 'SHARE_REQUEST';
+  /** 결제 요청 ID (UUID) */
+  id: string;
+  /** 상태 */
+  status: ShareRequestStatus;
+  /** 파일 ID 목록 (다건 가능) */
+  fileIds: string[];
+  /** 생성일시 (ISO 8601) */
+  createdAt: string;
+  /** 요청자 ID (UUID) */
+  ownerId: string;
+}
+
+// ─── 701-B. 내가 보낸 공유 (PublicShare) 응답 타입 ───
 
 /** 내가 보낸 공유 통합 목록 아이템 */
 export interface MySentShareItem {

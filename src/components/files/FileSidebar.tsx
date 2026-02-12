@@ -2,7 +2,8 @@
  * FileSidebar - 파일 관리 사이드바
  * api-guide-file-share.md 기반 네비게이션
  *
- * 701. 내 공유 관리 (보낸 공유 통합 목록)
+ * 701-A. 파일 공유 결제 (내가 보낸 결제 요청: PENDING / APPROVED / REJECTED / CANCELED)
+ * 701-B. 내 공유 관리 (보낸 공유 통합 목록)
  * 702. 받은 공유 요청 관리 (PENDING / APPROVED / REJECTED)
  */
 
@@ -21,6 +22,10 @@ export type ViewType =
   | 'favorites'
   | 'trash'
   | 'sentShares'
+  | 'sentRequestPending'
+  | 'sentRequestApproved'
+  | 'sentRequestRejected'
+  | 'sentRequestCanceled'
   | 'receivedPending'
   | 'receivedApproved'
   | 'receivedRejected';
@@ -30,6 +35,12 @@ interface FileSidebarProps {
   onViewChange: (view: ViewType) => void;
   storageInfo?: StorageInfo | null;
   sentShareCount?: number;
+  sentRequestCounts?: {
+    pending: number;
+    approved: number;
+    rejected: number;
+    canceled: number;
+  };
   receivedCounts?: {
     pending: number;
     approved: number;
@@ -87,13 +98,14 @@ function IconPaperAirplane({ className = 'w-5 h-5' }: { className?: string }) {
   );
 }
 
-function IconInboxArrowDown({ className = 'w-5 h-5' }: { className?: string }) {
-  return (
-    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 3.75H6.912a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859M12 3v8.25m0 0-3-3m3 3 3-3" />
-    </svg>
-  );
-}
+// NOTE: IconInboxArrowDown 는 702 "받은 공유 요청" 부활 시 함께 복원
+// function IconInboxArrowDown({ className = 'w-5 h-5' }: { className?: string }) {
+//   return (
+//     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+//       <path strokeLinecap="round" strokeLinejoin="round" d="M9 3.75H6.912a2.25 2.25 0 0 0-2.15 1.588L2.35 13.177a2.25 2.25 0 0 0-.1.661V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18v-4.162c0-.224-.034-.447-.1-.661L19.24 5.338a2.25 2.25 0 0 0-2.15-1.588H15M2.25 13.5h3.86a2.25 2.25 0 0 1 2.012 1.244l.256.512a2.25 2.25 0 0 0 2.013 1.244h3.218a2.25 2.25 0 0 0 2.013-1.244l.256-.512a2.25 2.25 0 0 1 2.013-1.244h3.859M12 3v8.25m0 0-3-3m3 3 3-3" />
+//     </svg>
+//   );
+// }
 
 function IconClockPending({ className = 'w-4 h-4' }: { className?: string }) {
   return (
@@ -115,6 +127,22 @@ function IconXCircle({ className = 'w-4 h-4' }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="m9.75 9.75 4.5 4.5m0-4.5-4.5 4.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
+    </svg>
+  );
+}
+
+function IconNoSymbol({ className = 'w-4 h-4' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M18.364 18.364A9 9 0 0 0 5.636 5.636m12.728 12.728A9 9 0 0 1 5.636 5.636m12.728 12.728L5.636 5.636" />
+    </svg>
+  );
+}
+
+function IconDocumentText({ className = 'w-5 h-5' }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" />
     </svg>
   );
 }
@@ -170,15 +198,16 @@ function CountBadge({
   );
 }
 
-/** 알림 도트 (빨간 점) */
-function NotificationDot() {
-  return (
-    <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
-      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
-      <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
-    </span>
-  );
-}
+// NOTE: NotificationDot 는 702 "받은 공유 요청" 부활 시 함께 복원
+// /** 알림 도트 (빨간 점) */
+// function NotificationDot() {
+//   return (
+//     <span className="absolute -top-0.5 -right-0.5 flex h-2.5 w-2.5">
+//       <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75" />
+//       <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500" />
+//     </span>
+//   );
+// }
 
 // ─── 메인 컴포넌트 ───
 
@@ -187,17 +216,23 @@ export function FileSidebar({
   onViewChange,
   storageInfo,
   sentShareCount = 0,
-  receivedCounts = { pending: 0, approved: 0, rejected: 0 },
+  sentRequestCounts = { pending: 0, approved: 0, rejected: 0, canceled: 0 },
+  // NOTE: receivedCounts 는 702 "받은 공유 요청" 부활 시 함께 복원
+  receivedCounts: _receivedCounts = { pending: 0, approved: 0, rejected: 0 },
 }: FileSidebarProps) {
+  void _receivedCounts; // 추후 부활용 - lint 경고 방지
   const [sentShareExpanded, setSentShareExpanded] = useState(true);
-  const [receivedExpanded, setReceivedExpanded] = useState(true);
+  const [sentRequestExpanded, setSentRequestExpanded] = useState(true);
+  // NOTE: receivedExpanded 는 702 "받은 공유 요청" 부활 시 함께 복원
+  // const [receivedExpanded, setReceivedExpanded] = useState(true);
 
   const usagePercent = storageInfo
     ? Math.min((storageInfo.used / storageInfo.total) * 100, 100)
     : 0;
 
-  const totalReceivedCount =
-    receivedCounts.pending + receivedCounts.approved + receivedCounts.rejected;
+  // NOTE: totalReceivedCount 는 702 "받은 공유 요청" 부활 시 함께 복원
+  // const totalReceivedCount =
+  //   receivedCounts.pending + receivedCounts.approved + receivedCounts.rejected;
 
   // ── 네비게이션 버튼 스타일 ──
   const navButtonClass = (id: ViewType) =>
@@ -224,10 +259,16 @@ export function FileSidebar({
     }`;
 
   const isSentShareActive = currentView === 'sentShares';
-  const isReceivedActive =
-    currentView === 'receivedPending' ||
-    currentView === 'receivedApproved' ||
-    currentView === 'receivedRejected';
+  const isSentRequestActive =
+    currentView === 'sentRequestPending' ||
+    currentView === 'sentRequestApproved' ||
+    currentView === 'sentRequestRejected' ||
+    currentView === 'sentRequestCanceled';
+  // NOTE: isReceivedActive 는 702 "받은 공유 요청" 부활 시 함께 복원
+  // const isReceivedActive =
+  //   currentView === 'receivedPending' ||
+  //   currentView === 'receivedApproved' ||
+  //   currentView === 'receivedRejected';
 
   return (
     <aside className="w-60 bg-white border-r border-gray-200 flex flex-col select-none">
@@ -349,7 +390,114 @@ export function FileSidebar({
           )}
         </div>
 
-        {/* ── 702. 받은 요청 (접기/펼치기) ── */}
+        {/* ── 701-A. 파일 공유 결제 (보낸 결제 요청) (접기/펼치기) ── */}
+        <div className="mt-0.5 space-y-0.5">
+          <button
+            onClick={() => {
+              setSentRequestExpanded((e) => !e);
+              if (!sentRequestExpanded) onViewChange('sentRequestPending');
+            }}
+            className={sectionToggleClass(isSentRequestActive)}
+          >
+            <IconDocumentText
+              className={`w-5 h-5 flex-shrink-0 ${
+                isSentRequestActive ? 'text-blue-600' : 'text-gray-400'
+              }`}
+            />
+            <span className="flex-1 text-left">파일 공유 결제</span>
+            {sentRequestCounts.pending > 0 && (
+              <CountBadge count={sentRequestCounts.pending} variant="warning" />
+            )}
+            <span className="text-gray-400 ml-1 flex-shrink-0">
+              {sentRequestExpanded ? (
+                <IconChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <IconChevronRight className="w-3.5 h-3.5" />
+              )}
+            </span>
+          </button>
+
+          {sentRequestExpanded && (
+            <div className="space-y-0.5">
+              {/* 승인 대기 (PENDING) */}
+              <button
+                onClick={() => onViewChange('sentRequestPending')}
+                className={subNavClass('sentRequestPending')}
+              >
+                <IconClockPending
+                  className={`w-4 h-4 flex-shrink-0 ${
+                    currentView === 'sentRequestPending'
+                      ? 'text-amber-600'
+                      : 'text-amber-400'
+                  }`}
+                />
+                <span>승인 대기</span>
+                <CountBadge
+                  count={sentRequestCounts.pending}
+                  variant="warning"
+                />
+              </button>
+
+              {/* 승인 완료 (APPROVED) */}
+              <button
+                onClick={() => onViewChange('sentRequestApproved')}
+                className={subNavClass('sentRequestApproved')}
+              >
+                <IconCheckCircle
+                  className={`w-4 h-4 flex-shrink-0 ${
+                    currentView === 'sentRequestApproved'
+                      ? 'text-emerald-600'
+                      : 'text-emerald-400'
+                  }`}
+                />
+                <span>승인 완료</span>
+                <CountBadge
+                  count={sentRequestCounts.approved}
+                  variant="success"
+                />
+              </button>
+
+              {/* 거부됨 (REJECTED) */}
+              <button
+                onClick={() => onViewChange('sentRequestRejected')}
+                className={subNavClass('sentRequestRejected')}
+              >
+                <IconXCircle
+                  className={`w-4 h-4 flex-shrink-0 ${
+                    currentView === 'sentRequestRejected'
+                      ? 'text-red-600'
+                      : 'text-red-400'
+                  }`}
+                />
+                <span>거부됨</span>
+                <CountBadge
+                  count={sentRequestCounts.rejected}
+                  variant="danger"
+                />
+              </button>
+
+              {/* 취소됨 (CANCELED) */}
+              <button
+                onClick={() => onViewChange('sentRequestCanceled')}
+                className={subNavClass('sentRequestCanceled')}
+              >
+                <IconNoSymbol
+                  className={`w-4 h-4 flex-shrink-0 ${
+                    currentView === 'sentRequestCanceled'
+                      ? 'text-gray-600'
+                      : 'text-gray-400'
+                  }`}
+                />
+                <span>취소됨</span>
+                <CountBadge
+                  count={sentRequestCounts.canceled}
+                />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* ── 702. 받은 공유 요청 — 현재 미사용, 추후 부활 가능 ──
         <div className="mt-0.5 space-y-0.5">
           <button
             onClick={() => {
@@ -366,7 +514,7 @@ export function FileSidebar({
               />
               {receivedCounts.pending > 0 && <NotificationDot />}
             </span>
-            <span className="flex-1 text-left">받은 요청</span>
+            <span className="flex-1 text-left">받은 공유 요청</span>
             {totalReceivedCount > 0 && (
               <CountBadge count={totalReceivedCount} />
             )}
@@ -381,7 +529,6 @@ export function FileSidebar({
 
           {receivedExpanded && (
             <div className="space-y-0.5">
-              {/* 대기 중 (PENDING) - 승인 필요 표시 */}
               <button
                 onClick={() => onViewChange('receivedPending')}
                 className={subNavClass('receivedPending')}
@@ -400,7 +547,6 @@ export function FileSidebar({
                 />
               </button>
 
-              {/* 승인함 (APPROVED) */}
               <button
                 onClick={() => onViewChange('receivedApproved')}
                 className={subNavClass('receivedApproved')}
@@ -419,7 +565,6 @@ export function FileSidebar({
                 />
               </button>
 
-              {/* 반려함 (REJECTED) */}
               <button
                 onClick={() => onViewChange('receivedRejected')}
                 className={subNavClass('receivedRejected')}
@@ -440,6 +585,7 @@ export function FileSidebar({
             </div>
           )}
         </div>
+        */}
       </nav>
 
       {/* 스토리지 용량 표시 */}

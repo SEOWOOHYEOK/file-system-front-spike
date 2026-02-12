@@ -1,5 +1,6 @@
 /**
- * SentShareDetail - 내가 공유한 파일 상세 모달
+ * SentShareDetail - 내가 보낸 공유 상세 모달
+ * 701-B API: /v1/file-shares/my-shares/:id
  * PublicShare 상세 정보 표시 및 철회 기능
  */
 import { useState, useEffect, useCallback } from 'react';
@@ -61,7 +62,7 @@ export function SentShareDetail({
 
     setRevoking(true);
     try {
-      await mySentShareApi.cancel(shareId);
+      await mySentShareApi.revoke(shareId);
       onRevoked?.();
       onClose();
     } catch (err) {

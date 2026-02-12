@@ -1551,7 +1551,7 @@ export function AdminPage() {
           {activeTab === 'user' && (
             <div className="bg-white rounded-lg shadow-sm p-4">
               <div className="flex items-center justify-between mb-3">
-                <h3 className="font-medium text-gray-900">사용자 관리</h3>
+                <h3 className="font-medium text-gray-900">사용자 관리(810)</h3>
                 <div className="flex space-x-2">
                   <button
                     onClick={fetchUsers}

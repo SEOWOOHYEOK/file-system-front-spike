@@ -14,40 +14,57 @@ const navItems = [
     path: '/my-files',
     icon: '📁',
   },
+  // {
+  //   title: '공유 요청 관리(807)',
+  //   path: '/admin/share-requests',
+  //   icon: '📨',
+  // },
+ 
   {
-    title: '공유 요청 관리',
-    path: '/admin/share-requests',
-    icon: '📨',
-  },
-  {
-    title: '사용자관리',
-    path: '/admin/user-management',
-    icon: '👤',
-  },
-  {
-    title: 'NAS 관리',
-    path: '/admin/observability',
-    icon: '📊',
-  },
-  {
-    title: '동기화 대시보드',
+    title: '동기화 대시보드(802)',
     path: '/admin/sync-dashboard',
     icon: '🔄',
   },
   {
-    title: '파일 요청 관리',
+    title: 'NAS 관리(803)',
+    path: '/admin/observability',
+    icon: '📊',
+  },
+
+  {
+    title: '파일 작업(이동, 삭제)요청 관리',
     path: '/admin/file-action-requests',
     icon: '📋',
   },
   {
-    title: '역할별 권한 관리',
+    title: '파일 결제 관리(모니터링 807)',
+    path: '/admin/file-share-monitor',
+    icon: '📊',
+  },
+  {
+    title: '사용자관리(810)',
+    path: '/admin/user-management',
+    icon: '👤',
+  },
+  {
+    title: '역할별 권한 관리(809)',
     path: '/admin/role-permissions',
     icon: '🛡️',
+  },
+  {
+    title: '파일 공유 관리(전체805)',
+    path: '/admin/share-management',
+    icon: '🔗',
   },
   {
     title: '감사 로그',
     path: '/admin/audit-logs',
     icon: '📋',
+  },
+  {
+    title: '나에게 공유된 파일(710)',
+    path: '/external-file-access',
+    icon: '📥',
   },
 ];
 

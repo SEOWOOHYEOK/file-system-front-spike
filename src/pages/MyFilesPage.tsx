@@ -27,9 +27,10 @@ import {
   ShareRequestModal,
   FileActionRequestModal,
   SentSharesView,
+  SentShareRequestsView,
   ReceivedRequestsView,
 } from '../components/files';
-import { mySentShareApi, receivedRequestApi } from '../api/fileShareApi';
+import { mySentShareApi, mySentShareRequestApi, receivedRequestApi } from '../api/fileShareApi';
 import type {
   FolderContentsResponse,
   BreadcrumbItem,
@@ -164,6 +165,12 @@ export function MyFilesPage() {
   // 파일 공유 카운트 (사이드바용)
   // ============================================
   const [sentShareCount, setSentShareCount] = useState(0);
+  const [sentRequestCounts, setSentRequestCounts] = useState({
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+    canceled: 0,
+  });
   const [receivedCounts, setReceivedCounts] = useState({
     pending: 0,
     approved: 0,
@@ -692,13 +699,34 @@ export function MyFilesPage() {
   const loadShareCounts = useCallback(async () => {
     if (!auth.token) return;
     try {
-      const [sentResp, pendingResp, approvedResp, rejectedResp] = await Promise.all([
+      const [
+        sentResp,
+        // 701-A: 보낸 결제 요청 카운트
+        srPendingResp,
+        srApprovedResp,
+        srRejectedResp,
+        srCanceledResp,
+        // 702: 받은 요청 카운트
+        pendingResp,
+        approvedResp,
+        rejectedResp,
+      ] = await Promise.all([
         mySentShareApi.getList({ page: 1, pageSize: 1 }),
+        mySentShareRequestApi.getList({ status: 'PENDING', page: 1, pageSize: 1 }),
+        mySentShareRequestApi.getList({ status: 'APPROVED', page: 1, pageSize: 1 }),
+        mySentShareRequestApi.getList({ status: 'REJECTED', page: 1, pageSize: 1 }),
+        mySentShareRequestApi.getList({ status: 'CANCELED', page: 1, pageSize: 1 }),
         receivedRequestApi.getList({ status: 'PENDING', page: 1, pageSize: 1 }),
         receivedRequestApi.getList({ status: 'APPROVED', page: 1, pageSize: 1 }),
         receivedRequestApi.getList({ status: 'REJECTED', page: 1, pageSize: 1 }),
       ]);
       setSentShareCount(sentResp.totalItems);
+      setSentRequestCounts({
+        pending: srPendingResp.totalItems,
+        approved: srApprovedResp.totalItems,
+        rejected: srRejectedResp.totalItems,
+        canceled: srCanceledResp.totalItems,
+      });
       setReceivedCounts({
         pending: pendingResp.totalItems,
         approved: approvedResp.totalItems,
@@ -926,6 +954,7 @@ export function MyFilesPage() {
         onViewChange={handleViewChange}
         storageInfo={storageInfo}
         sentShareCount={sentShareCount}
+        sentRequestCounts={sentRequestCounts}
         receivedCounts={receivedCounts}
       />
 
@@ -1230,12 +1259,31 @@ export function MyFilesPage() {
             </div>
           )}
 
-          {/* 내가 공유한 파일 뷰 */}
+          {/* 내가 공유한 파일 뷰 (701-B) */}
           {currentView === 'sentShares' && (
             <SentSharesView />
           )}
 
-          {/* 받은 요청 뷰 */}
+          {/* 보낸 결제 요청 뷰 (701-A) */}
+          {(currentView === 'sentRequestPending' ||
+            currentView === 'sentRequestApproved' ||
+            currentView === 'sentRequestRejected' ||
+            currentView === 'sentRequestCanceled') && (
+            <SentShareRequestsView
+              statusFilter={
+                currentView === 'sentRequestPending'
+                  ? 'PENDING'
+                  : currentView === 'sentRequestApproved'
+                    ? 'APPROVED'
+                    : currentView === 'sentRequestRejected'
+                      ? 'REJECTED'
+                      : 'CANCELED'
+              }
+              onCountsChange={loadShareCounts}
+            />
+          )}
+
+          {/* 받은 공유 요청 뷰 (702) */}
           {(currentView === 'receivedPending' ||
             currentView === 'receivedApproved' ||
             currentView === 'receivedRejected') && (

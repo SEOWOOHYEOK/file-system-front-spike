@@ -12,11 +12,13 @@ import type {
   CheckAvailabilityResponse,
   CreateShareRequestRequest,
   ShareRequestResponse,
+  MySentShareRequestItem,
   MySentShareItem,
   PublicShareResponse,
   RevokeShareResponse,
   ApproveReceivedRequestBody,
   RejectReceivedRequestBody,
+  ShareRequestStatus,
 } from '../types/file-share.types';
 
 // ─── Query parameter interfaces ───
@@ -34,6 +36,14 @@ export interface SearchApproversParams {
   keyword?: string;
   page?: number;
   pageSize?: number;
+}
+
+export interface MySentShareRequestListParams {
+  status?: ShareRequestStatus;
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
 }
 
 export interface MySentShareListParams {
@@ -101,29 +111,62 @@ export const fileShareRequestApi = {
   },
 };
 
-// ─── 701. 보낸 공유 관리 ───
+// ─── 701-A. 내가 보낸 결제 요청 관리 (ShareRequest) ───
+// API Guide: api-guide-701a-my-sent-share-request
+// GET  /v1/file-shares-requests/my-sent-requests           → 결제 요청 목록 조회
+// POST /v1/file-shares-requests/my-sent-requests/:id/cancel → 결제 요청 취소
 
-export const mySentShareApi = {
+export const mySentShareRequestApi = {
+  /** 결제 요청 목록 조회 (status: PENDING | APPROVED | REJECTED | CANCELED) */
   getList: async (
-    params?: MySentShareListParams,
-  ): Promise<PaginatedResponse<MySentShareItem>> => {
-    const { data } = await apiClient.get<PaginatedResponse<MySentShareItem>>(
-      '/file-shares-requests/my-sent',
+    params?: MySentShareRequestListParams,
+  ): Promise<PaginatedResponse<MySentShareRequestItem>> => {
+    const { data } = await apiClient.get<PaginatedResponse<MySentShareRequestItem>>(
+      '/file-shares-requests/my-sent-requests',
       { params },
     );
     return data;
   },
 
-  getDetail: async (id: string): Promise<PublicShareResponse> => {
-    const { data } = await apiClient.get<PublicShareResponse>(
-      `/file-shares-requests/my-sent/${id}`,
+  /** 결제 요청 취소 (PENDING → CANCELED) */
+  cancel: async (id: string): Promise<ShareRequestResponse> => {
+    const { data } = await apiClient.post<ShareRequestResponse>(
+      `/file-shares-requests/my-sent-requests/${id}/cancel`,
+    );
+    return data;
+  },
+};
+
+// ─── 701-B. 내가 보낸 공유 관리 (PublicShare) ───
+// API Guide: api-guide-701b-my-sent-share
+// GET  /v1/file-shares/my-shares          → 공유 목록 조회
+// GET  /v1/file-shares/my-shares/:id      → 공유 상세 조회
+// POST /v1/file-shares/my-shares/:id/revoke → 공유 철회
+
+export const mySentShareApi = {
+  /** 공유 목록 조회 (status: ACTIVE | REVOKED) */
+  getList: async (
+    params?: MySentShareListParams,
+  ): Promise<PaginatedResponse<MySentShareItem>> => {
+    const { data } = await apiClient.get<PaginatedResponse<MySentShareItem>>(
+      '/file-shares/my-shares',
+      { params },
     );
     return data;
   },
 
-  cancel: async (id: string): Promise<ShareRequestResponse | RevokeShareResponse> => {
-    const { data } = await apiClient.post<ShareRequestResponse | RevokeShareResponse>(
-      `/file-shares-requests/my-sent/${id}/cancel`,
+  /** 공유 상세 조회 */
+  getDetail: async (id: string): Promise<PublicShareResponse> => {
+    const { data } = await apiClient.get<PublicShareResponse>(
+      `/file-shares/my-shares/${id}`,
+    );
+    return data;
+  },
+
+  /** 공유 철회 (ACTIVE → REVOKED) */
+  revoke: async (id: string): Promise<RevokeShareResponse> => {
+    const { data } = await apiClient.post<RevokeShareResponse>(
+      `/file-shares/my-shares/${id}/revoke`,
     );
     return data;
   },

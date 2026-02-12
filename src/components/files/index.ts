@@ -16,5 +16,6 @@ export { ShareRequestModal } from './ShareRequestModal';
 export { FileActionRequestModal } from './FileActionRequestModal';
 export { SentSharesView } from './SentSharesView';
 export { SentShareDetail } from './SentShareDetail';
+export { SentShareRequestsView } from './SentShareRequestsView';
 export { ReceivedRequestsView } from './ReceivedRequestsView';
 export { ReceivedRequestDetail } from './ReceivedRequestDetail';
