@@ -24,6 +24,7 @@ import {
   FileModals,
   TrashView,
   ShareRequestModal,
+  FileActionRequestModal,
 } from '../components/files';
 import type {
   FolderContentsResponse,
@@ -39,6 +40,7 @@ import type {
   FavoriteTargetType,
   RecentActivityItem,
 } from '../types/user.types';
+import type { FileActionType } from '../types/file-action-request.types';
 
 // 뷰 타입
 type ViewType = 'all' | 'recent' | 'favorites' | 'trash';
@@ -210,6 +212,14 @@ export function MyFilesPage() {
   // ============================================
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [shareFiles, setShareFiles] = useState<Array<{ id: string; name: string }>>([]);
+
+  // ============================================
+  // 파일 작업 요청 모달 상태
+  // ============================================
+  const [isActionRequestModalOpen, setIsActionRequestModalOpen] = useState(false);
+  const [actionRequestFileId, setActionRequestFileId] = useState('');
+  const [actionRequestFileName, setActionRequestFileName] = useState('');
+  const [actionRequestType, setActionRequestType] = useState<FileActionType>('MOVE');
 
   // ============================================
   // 폴더 API 호출
@@ -730,6 +740,22 @@ export function MyFilesPage() {
       case 'delete':
         setTargetItem(item);
         setActiveModal('delete');
+        break;
+      case 'moveRequest':
+        if (item.type === 'file') {
+          setActionRequestFileId(item.id);
+          setActionRequestFileName(item.name);
+          setActionRequestType('MOVE');
+          setIsActionRequestModalOpen(true);
+        }
+        break;
+      case 'deleteRequest':
+        if (item.type === 'file') {
+          setActionRequestFileId(item.id);
+          setActionRequestFileName(item.name);
+          setActionRequestType('DELETE');
+          setIsActionRequestModalOpen(true);
+        }
         break;
     }
     setContextMenu({ visible: false, x: 0, y: 0, item: null });
@@ -1436,6 +1462,21 @@ export function MyFilesPage() {
         }}
         token={auth.token || ''}
         files={shareFiles}
+      />
+
+      {/* 파일 작업 요청 모달 (이동/삭제 요청) */}
+      <FileActionRequestModal
+        isOpen={isActionRequestModalOpen}
+        onClose={() => {
+          setIsActionRequestModalOpen(false);
+          setActionRequestFileId('');
+          setActionRequestFileName('');
+        }}
+        token={auth.token || ''}
+        fileId={actionRequestFileId}
+        fileName={actionRequestFileName}
+        requestType={actionRequestType}
+        onSuccess={refreshCurrentFolder}
       />
     </div>
   );

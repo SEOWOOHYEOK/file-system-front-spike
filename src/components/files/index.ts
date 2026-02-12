@@ -13,3 +13,4 @@ export { UploadDropzone } from './UploadDropzone';
 export { FileModals } from './FileModals';
 export { TrashView } from './TrashView';
 export { ShareRequestModal } from './ShareRequestModal';
+export { FileActionRequestModal } from './FileActionRequestModal';

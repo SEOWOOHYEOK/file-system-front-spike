@@ -1,23 +1,15 @@
 /**
  * UserManagementPage - 사용자 관리 페이지
- * 조직도 사이드바 + 사용자 목록 테이블 + DMS 역할 관리
+ * 조직도 사이드바 (부서 API 기반) + 사용자 목록 테이블 + DMS 역할 관리
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useInternalAuth } from '../hooks/useInternalAuth';
 import { adminUserApi } from '../api/adminUserApi';
 import { roleApi } from '../api/roleApi';
+import { departmentApi } from '../api/departmentApi';
 import type { UserWithEmployee, Role, DepartmentPosition } from '../types/user.types';
-
-// ─── 조직 트리 타입 ───
-
-interface OrgNode {
-  id: string;
-  name: string;
-  children: OrgNode[];
-  userCount: number;
-  isExpanded: boolean;
-  level: 'company' | 'division' | 'department';
-}
+import type { DepartmentHierarchyResponse, DepartmentType } from '../types/department.types';
+import { DEPARTMENT_TYPE_LABELS } from '../types/department.types';
 
 // ─── 아바타 색상 맵 ───
 
@@ -48,105 +40,53 @@ function getInitial(name: string): string {
   return name.charAt(0);
 }
 
-// ─── 조직 트리 빌더 ───
+// ─── 부서 트리 헬퍼 ───
 
-/** 부서명에서 상위 본부 추출 (규칙 기반) */
-function inferDivision(departmentName: string): string {
-  // 본부명을 포함하는 경우
-  if (departmentName.includes('경영지원') || departmentName.includes('사업개발')) {
-    return '경영지원본부';
+/** 부서 유형별 아이콘 색상 */
+function getDeptIconColor(type: DepartmentType): string {
+  switch (type) {
+    case 'COMPANY':
+      return 'text-gray-600';
+    case 'DIVISION':
+      return 'text-blue-500';
+    case 'DEPARTMENT':
+      return 'text-green-500';
+    case 'TEAM':
+      return 'text-gray-400';
+    default:
+      return 'text-gray-400';
   }
-  if (
-    departmentName.includes('PM') ||
-    departmentName.includes('시스템') ||
-    departmentName.includes('ES') ||
-    departmentName.includes('IP') ||
-    departmentName.includes('EP') ||
-    departmentName.includes('EC') ||
-    departmentName.includes('RF') ||
-    departmentName.includes('MEDIA') ||
-    departmentName.includes('연구') ||
-    departmentName.includes('개발') ||
-    departmentName.endsWith('파트')
-  ) {
-    return '연구개발본부';
-  }
-  return '기타';
 }
 
-function buildOrgTree(users: UserWithEmployee[]): OrgNode {
-  // 부서별 사용자 수 집계
-  const deptUserCount = new Map<string, Set<string>>();
-
-  for (const user of users) {
-    if (!user.employee?.departmentPositions) continue;
-    for (const dp of user.employee.departmentPositions) {
-      if (!deptUserCount.has(dp.departmentName)) {
-        deptUserCount.set(dp.departmentName, new Set());
-      }
-      deptUserCount.get(dp.departmentName)!.add(user.id);
-    }
+/** 특정 부서와 그 하위 부서의 모든 ID를 수집 */
+function collectDepartmentIds(dept: DepartmentHierarchyResponse): string[] {
+  const ids = [dept.id];
+  for (const child of dept.children) {
+    ids.push(...collectDepartmentIds(child));
   }
+  return ids;
+}
 
-  // 본부별 부서 그룹핑
-  const divisionMap = new Map<string, Map<string, number>>();
+/** 부서 계층 트리에서 검색어로 필터링 */
+function filterDepartmentTree(
+  departments: DepartmentHierarchyResponse[],
+  query: string,
+): DepartmentHierarchyResponse[] {
+  if (!query.trim()) return departments;
+  const q = query.trim().toLowerCase();
 
-  for (const [deptName, userIds] of deptUserCount) {
-    const division = inferDivision(deptName);
-    if (!divisionMap.has(division)) {
-      divisionMap.set(division, new Map());
+  const filter = (dept: DepartmentHierarchyResponse): DepartmentHierarchyResponse | null => {
+    const filteredChildren = dept.children
+      .map(filter)
+      .filter(Boolean) as DepartmentHierarchyResponse[];
+
+    if (dept.departmentName.toLowerCase().includes(q) || filteredChildren.length > 0) {
+      return { ...dept, children: filteredChildren };
     }
-    divisionMap.get(division)!.set(deptName, userIds.size);
-  }
-
-  // 트리 노드 생성
-  const divisionNodes: OrgNode[] = [];
-
-  for (const [divName, departments] of divisionMap) {
-    const deptNodes: OrgNode[] = [];
-    let divTotal = 0;
-
-    for (const [deptName, count] of departments) {
-      deptNodes.push({
-        id: `dept-${deptName}`,
-        name: deptName,
-        children: [],
-        userCount: count,
-        isExpanded: false,
-        level: 'department',
-      });
-      divTotal += count;
-    }
-
-    // 부서명 정렬
-    deptNodes.sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-
-    divisionNodes.push({
-      id: `div-${divName}`,
-      name: divName,
-      children: deptNodes,
-      userCount: divTotal,
-      isExpanded: true,
-      level: 'division',
-    });
-  }
-
-  // 본부 정렬 (경영지원 → 연구개발 → 기타)
-  const order = ['경영지원본부', '연구개발본부', '기타'];
-  divisionNodes.sort((a, b) => {
-    const ai = order.indexOf(a.name);
-    const bi = order.indexOf(b.name);
-    return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-  });
-
-  return {
-    id: 'company',
-    name: '루미르 주식회사',
-    children: divisionNodes,
-    userCount: users.length,
-    isExpanded: true,
-    level: 'company',
+    return null;
   };
+
+  return departments.map(filter).filter(Boolean) as DepartmentHierarchyResponse[];
 }
 
 // ─── 역할별 카운트 계산 ───
@@ -215,9 +155,12 @@ export function UserManagementPage() {
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
 
-  // 조직 트리
-  const [orgTree, setOrgTree] = useState<OrgNode | null>(null);
-  const [selectedDepartment, setSelectedDepartment] = useState<string | null>(null);
+  // 부서 트리 (API 기반)
+  const [departmentTree, setDepartmentTree] = useState<DepartmentHierarchyResponse[]>([]);
+  const [deptLoading, setDeptLoading] = useState(false);
+  const [selectedDepartment, setSelectedDepartment] = useState<DepartmentHierarchyResponse | null>(null);
+  const [expandedDepts, setExpandedDepts] = useState<Set<string>>(new Set());
+  const [deptSearchQuery, setDeptSearchQuery] = useState('');
 
   // 정렬
   const [sortField, setSortField] = useState<'name' | 'email'>('name');
@@ -250,20 +193,37 @@ export function UserManagementPage() {
     }
   }, [auth.token]);
 
+  const fetchDepartments = useCallback(async () => {
+    if (!auth.token) return;
+    setDeptLoading(true);
+    try {
+      const data = await departmentApi.getHierarchy(auth.token);
+      setDepartmentTree(data);
+      // 최상위 부서들을 기본 확장
+      const initialExpanded = new Set<string>();
+      for (const dept of data) {
+        initialExpanded.add(dept.id);
+        // 하위 1레벨도 자동 확장
+        for (const child of dept.children) {
+          initialExpanded.add(child.id);
+        }
+      }
+      setExpandedDepts(initialExpanded);
+    } catch (error) {
+      console.error('Failed to fetch departments:', error);
+    } finally {
+      setDeptLoading(false);
+    }
+  }, [auth.token]);
+
   // 초기 로드
   useEffect(() => {
     if (auth.isAuthenticated) {
       fetchUsers();
       fetchRoles();
+      fetchDepartments();
     }
-  }, [auth.isAuthenticated, fetchUsers, fetchRoles]);
-
-  // 조직 트리 빌드
-  useEffect(() => {
-    if (users.length > 0) {
-      setOrgTree(buildOrgTree(users));
-    }
-  }, [users]);
+  }, [auth.isAuthenticated, fetchUsers, fetchRoles, fetchDepartments]);
 
   // ── 역할 변경 ──
   const handleRoleChange = useCallback(
@@ -308,23 +268,22 @@ export function UserManagementPage() {
     }
   }, [auth.token, fetchUsers]);
 
-  // ── 트리 토글 ──
-  const toggleNode = useCallback((nodeId: string) => {
-    setOrgTree((prev) => {
-      if (!prev) return null;
-      const toggle = (node: OrgNode): OrgNode => {
-        if (node.id === nodeId) {
-          return { ...node, isExpanded: !node.isExpanded };
-        }
-        return { ...node, children: node.children.map(toggle) };
-      };
-      return toggle(prev);
+  // ── 트리 확장/축소 ──
+  const toggleExpand = useCallback((deptId: string) => {
+    setExpandedDepts((prev) => {
+      const next = new Set(prev);
+      if (next.has(deptId)) {
+        next.delete(deptId);
+      } else {
+        next.add(deptId);
+      }
+      return next;
     });
   }, []);
 
-  // ── 부서 선택 ──
-  const handleDeptSelect = useCallback((deptName: string | null) => {
-    setSelectedDepartment((prev) => (prev === deptName ? null : deptName));
+  // ── 부서 선택 (선택된 부서 + 하위 부서 인원 모두 표시) ──
+  const handleDeptSelect = useCallback((dept: DepartmentHierarchyResponse | null) => {
+    setSelectedDepartment((prev) => (prev?.id === dept?.id ? null : dept));
   }, []);
 
   // ── roleId → roleName 맵 ──
@@ -339,15 +298,21 @@ export function UserManagementPage() {
   // ── 역할별 카운트 ──
   const roleCounts = useMemo(() => getRoleCounts(users, roles), [users, roles]);
 
+  // ── 선택된 부서 및 하위 부서 ID 집합 ──
+  const selectedDeptIds = useMemo(() => {
+    if (!selectedDepartment) return null;
+    return new Set(collectDepartmentIds(selectedDepartment));
+  }, [selectedDepartment]);
+
   // ── 필터링된 사용자 목록 ──
   const filteredUsers = useMemo(() => {
     let result = [...users];
 
-    // 부서 필터
-    if (selectedDepartment) {
+    // 부서 필터 (선택된 부서 + 하위 부서 소속 인원)
+    if (selectedDeptIds) {
       result = result.filter((user) =>
         user.employee?.departmentPositions.some(
-          (dp) => dp.departmentName === selectedDepartment
+          (dp) => selectedDeptIds.has(dp.departmentId)
         )
       );
     }
@@ -389,7 +354,7 @@ export function UserManagementPage() {
     });
 
     return result;
-  }, [users, selectedDepartment, roleFilter, searchQuery, sortField, sortDir]);
+  }, [users, selectedDeptIds, roleFilter, searchQuery, sortField, sortDir]);
 
   // ── 정렬 토글 ──
   const handleSort = (field: 'name' | 'email') => {
@@ -406,13 +371,19 @@ export function UserManagementPage() {
     dps?: DepartmentPosition[]
   ): { department: string; position: string } => {
     if (!dps || dps.length === 0) return { department: '-', position: '-' };
-    // 선택된 부서가 있으면 해당 부서 정보 우선
-    if (selectedDepartment) {
-      const match = dps.find((dp) => dp.departmentName === selectedDepartment);
+    // 선택된 부서가 있으면 해당 부서 소속 정보 우선
+    if (selectedDeptIds) {
+      const match = dps.find((dp) => selectedDeptIds.has(dp.departmentId));
       if (match) return { department: match.departmentName, position: match.positionTitle };
     }
     return { department: dps[0].departmentName, position: dps[0].positionTitle };
   };
+
+  // ── 검색 필터링된 부서 트리 ──
+  const filteredDeptTree = useMemo(
+    () => filterDepartmentTree(departmentTree, deptSearchQuery),
+    [departmentTree, deptSearchQuery],
+  );
 
   // ── 인증 체크 ──
   if (!auth.isAuthenticated) {
@@ -423,15 +394,15 @@ export function UserManagementPage() {
     );
   }
 
-  // ── 트리 노드 렌더링 ──
-  const renderOrgNode = (node: OrgNode, depth: number = 0) => {
-    const hasChildren = node.children.length > 0;
-    const isSelected =
-      node.level === 'department' && selectedDepartment === node.name;
+  // ── 부서 트리 노드 렌더링 ──
+  const renderDeptNode = (dept: DepartmentHierarchyResponse, depth: number = 0) => {
+    const hasChildren = dept.children.length > 0;
+    const isExpanded = expandedDepts.has(dept.id);
+    const isSelected = selectedDepartment?.id === dept.id;
     const paddingLeft = depth * 16;
 
     return (
-      <div key={node.id}>
+      <div key={dept.id}>
         <div
           className={`flex items-center py-1.5 px-2 cursor-pointer rounded-md text-sm transition-colors ${
             isSelected
@@ -439,13 +410,7 @@ export function UserManagementPage() {
               : 'hover:bg-gray-100 text-gray-700'
           }`}
           style={{ paddingLeft: `${paddingLeft + 8}px` }}
-          onClick={() => {
-            if (node.level === 'department') {
-              handleDeptSelect(node.name);
-            } else {
-              toggleNode(node.id);
-            }
-          }}
+          onClick={() => handleDeptSelect(dept)}
         >
           {/* 확장/축소 아이콘 */}
           {hasChildren ? (
@@ -453,10 +418,10 @@ export function UserManagementPage() {
               className="mr-1 text-gray-400 w-4 text-center flex-shrink-0"
               onClick={(e) => {
                 e.stopPropagation();
-                toggleNode(node.id);
+                toggleExpand(dept.id);
               }}
             >
-              {node.isExpanded ? (
+              {isExpanded ? (
                 <svg className="w-3 h-3 inline" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                 </svg>
@@ -470,33 +435,35 @@ export function UserManagementPage() {
             <span className="mr-1 w-4 flex-shrink-0" />
           )}
 
-          {/* 아이콘 */}
-          {node.level === 'company' ? (
-            <svg className="w-4 h-4 mr-1.5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {/* 부서 유형별 아이콘 */}
+          {dept.type === 'COMPANY' ? (
+            <svg className={`w-4 h-4 mr-1.5 flex-shrink-0 ${getDeptIconColor(dept.type)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
             </svg>
-          ) : node.level === 'division' ? (
-            <svg className="w-4 h-4 mr-1.5 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+          ) : dept.type === 'DIVISION' ? (
+            <svg className={`w-4 h-4 mr-1.5 flex-shrink-0 ${getDeptIconColor(dept.type)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
             </svg>
           ) : (
-            <svg className="w-4 h-4 mr-1.5 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+            <svg className={`w-4 h-4 mr-1.5 flex-shrink-0 ${getDeptIconColor(dept.type)}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
           )}
 
-          {/* 이름 */}
-          <span className="truncate flex-1">{node.name}</span>
+          {/* 부서명 */}
+          <span className="truncate flex-1">{dept.departmentName}</span>
 
-          {/* 사용자 수 */}
-          <span className="text-xs text-gray-400 ml-1 flex-shrink-0">
-            {node.userCount}
-          </span>
+          {/* 인원 수 */}
+          {dept.memberCount > 0 && (
+            <span className="text-xs text-gray-400 ml-1 flex-shrink-0">
+              {dept.memberCount}
+            </span>
+          )}
         </div>
 
         {/* 자식 노드 */}
-        {hasChildren && node.isExpanded && (
-          <div>{node.children.map((child) => renderOrgNode(child, depth + 1))}</div>
+        {hasChildren && isExpanded && (
+          <div>{dept.children.map((child) => renderDeptNode(child, depth + 1))}</div>
         )}
       </div>
     );
@@ -505,7 +472,7 @@ export function UserManagementPage() {
   return (
     <div className="flex h-[calc(100vh-130px)] bg-white rounded-lg shadow-sm overflow-hidden">
       {/* ─── 좌측: 조직 사이드바 ─── */}
-      <aside className="w-64 border-r border-gray-200 flex flex-col bg-white flex-shrink-0">
+      <aside className="w-72 border-r border-gray-200 flex flex-col bg-white flex-shrink-0">
         {/* 헤더 */}
         <div className="p-4 border-b border-gray-100">
           <div className="flex items-center justify-between mb-3">
@@ -542,33 +509,10 @@ export function UserManagementPage() {
             </svg>
             <input
               type="text"
+              value={deptSearchQuery}
+              onChange={(e) => setDeptSearchQuery(e.target.value)}
               placeholder="부서 검색..."
               className="w-full pl-8 pr-3 py-1.5 text-xs border border-gray-200 rounded-md focus:outline-none focus:ring-1 focus:ring-blue-300 focus:border-blue-300"
-              onChange={(e) => {
-                // 부서 검색 시 트리 필터링 (간단 구현: 부서명 포함 여부)
-                const q = e.target.value.trim().toLowerCase();
-                if (!q) {
-                  // 전체 트리 재빌드
-                  setOrgTree(buildOrgTree(users));
-                  return;
-                }
-                // 필터된 트리
-                const fullTree = buildOrgTree(users);
-                const filterTree = (node: OrgNode): OrgNode | null => {
-                  if (node.level === 'department') {
-                    return node.name.toLowerCase().includes(q) ? node : null;
-                  }
-                  const filteredChildren = node.children
-                    .map(filterTree)
-                    .filter(Boolean) as OrgNode[];
-                  if (filteredChildren.length > 0 || node.name.toLowerCase().includes(q)) {
-                    return { ...node, children: filteredChildren, isExpanded: true };
-                  }
-                  return null;
-                };
-                const filtered = filterTree(fullTree);
-                if (filtered) setOrgTree(filtered);
-              }}
             />
           </div>
         </div>
@@ -588,15 +532,15 @@ export function UserManagementPage() {
           </div>
         </div>
 
-        {/* 조직 트리 */}
+        {/* 부서 계층 트리 */}
         <div className="flex-1 overflow-y-auto py-2 px-1">
-          {loading ? (
+          {deptLoading || loading ? (
             <div className="flex items-center justify-center py-8">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-500" />
             </div>
-          ) : orgTree ? (
+          ) : filteredDeptTree.length > 0 ? (
             <>
-              {renderOrgNode(orgTree)}
+              {filteredDeptTree.map((dept) => renderDeptNode(dept))}
               {/* 전체 보기 링크 */}
               {selectedDepartment && (
                 <button
@@ -607,9 +551,13 @@ export function UserManagementPage() {
                 </button>
               )}
             </>
+          ) : deptSearchQuery ? (
+            <p className="text-xs text-gray-400 text-center py-4">
+              "{deptSearchQuery}" 검색 결과가 없습니다
+            </p>
           ) : (
             <p className="text-xs text-gray-400 text-center py-4">
-              데이터를 불러오는 중...
+              부서 데이터를 불러오는 중...
             </p>
           )}
         </div>
@@ -629,8 +577,11 @@ export function UserManagementPage() {
                 ({filteredUsers.length}명)
               </span>
               {selectedDepartment && (
-                <span className="ml-2 px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full">
-                  {selectedDepartment}
+                <span className="ml-2 px-2 py-0.5 bg-blue-50 text-blue-600 text-xs rounded-full inline-flex items-center">
+                  {selectedDepartment.departmentName}
+                  <span className="ml-1 text-blue-400">
+                    ({DEPARTMENT_TYPE_LABELS[selectedDepartment.type]})
+                  </span>
                 </span>
               )}
             </h2>

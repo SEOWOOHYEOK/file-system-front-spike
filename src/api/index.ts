@@ -81,6 +81,11 @@ export {
 export { syncDashboardApi, setSyncDashboardLogCallback } from './syncDashboardApi';
 
 // ============================================
+// 파일 작업 요청 (File Action Request)
+// ============================================
+export { fileActionRequestApi, fileActionRequestAdminApi } from './fileActionRequestApi';
+
+// ============================================
 // Default Export (통합 API 객체)
 // ============================================
 import { authApi } from './authApi';
@@ -92,6 +97,7 @@ import { userApi } from './userApi';
 import { roleApi } from './roleApi';
 import { externalShareApi } from './externalShareApi';
 import { syncDashboardApi } from './syncDashboardApi';
+import { fileActionRequestApi, fileActionRequestAdminApi } from './fileActionRequestApi';
 
 export const api = {
   // 100.인증
@@ -129,6 +135,10 @@ export const api = {
 
   // 동기화 대시보드
   syncDashboard: syncDashboardApi,
+
+  // 파일 작업 요청
+  fileActionRequest: fileActionRequestApi,
+  fileActionRequestAdmin: fileActionRequestAdminApi,
 };
 
 export default api;

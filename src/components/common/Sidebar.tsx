@@ -50,6 +50,11 @@ const navItems = [
     icon: '🔄',
   },
   {
+    title: '파일 요청 관리',
+    path: '/admin/file-action-requests',
+    icon: '📋',
+  },
+  {
     title: '600.외부공유',
     path: '/shares',
     icon: '🔗',

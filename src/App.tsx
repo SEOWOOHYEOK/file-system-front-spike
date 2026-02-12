@@ -18,6 +18,7 @@ import { ExternalPage } from './pages/ExternalPage';
 import { AdminShareRequestPage } from './pages/AdminShareRequestPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { SyncDashboardPage } from './pages/SyncDashboardPage';
+import { AdminFileActionRequestPage } from './pages/AdminFileActionRequestPage';
 
 function App() {
   return (
@@ -45,6 +46,7 @@ function App() {
             <Route path="admin/share-requests" element={<AdminShareRequestPage />} />
             <Route path="admin/user-management" element={<UserManagementPage />} />
             <Route path="admin/sync-dashboard" element={<SyncDashboardPage />} />
+            <Route path="admin/file-action-requests" element={<AdminFileActionRequestPage />} />
             <Route path="shares" element={<SharePage />} />
             <Route path="external" element={<ExternalPage />} />
           </Route>

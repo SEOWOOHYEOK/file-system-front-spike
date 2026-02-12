@@ -60,6 +60,8 @@ export function ContextMenu({
     { id: 'move', label: '이동', icon: '📂' },
     { id: 'favorite', label: isFavorite ? '즐겨찾기 해제' : '즐겨찾기 추가', icon: isFavorite ? '⭐' : '☆' },
     { id: 'delete', label: '삭제', icon: '🗑️', separator: true, danger: true },
+    { id: 'moveRequest', label: '이동 요청', icon: '📋', separator: true },
+    { id: 'deleteRequest', label: '삭제 요청', icon: '📝', danger: true },
   ];
 
   const folderMenuItems: MenuItem[] = [

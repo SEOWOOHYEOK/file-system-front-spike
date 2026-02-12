@@ -229,6 +229,13 @@ export interface FileListItemInFolder {
   /** 파일 생성자 (업로더) ID */
   createdBy?: string;
   updatedAt: string;
+  /** PENDING 작업 요청 요약 (있으면 표시, 없으면 null) */
+  pendingActionRequest?: {
+    id: string;
+    type: 'MOVE' | 'DELETE';
+    status: 'PENDING';
+    requestedAt: string;
+  } | null;
 }
 
 /**
