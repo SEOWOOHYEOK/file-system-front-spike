@@ -86,6 +86,16 @@ export { syncDashboardApi, setSyncDashboardLogCallback } from './syncDashboardAp
 export { fileActionRequestApi, fileActionRequestAdminApi } from './fileActionRequestApi';
 
 // ============================================
+// 809.관리자 - 역할별 권한 매핑 관리
+// ============================================
+export { rolePermissionApi, setRolePermissionLogCallback } from './rolePermissionApi';
+
+// ============================================
+// 806.관리자 - 감사 로그 및 통합 타임라인
+// ============================================
+export { auditLogApi, setAuditLogCallback } from './auditLogApi';
+
+// ============================================
 // Default Export (통합 API 객체)
 // ============================================
 import { authApi } from './authApi';
@@ -98,6 +108,8 @@ import { roleApi } from './roleApi';
 import { externalShareApi } from './externalShareApi';
 import { syncDashboardApi } from './syncDashboardApi';
 import { fileActionRequestApi, fileActionRequestAdminApi } from './fileActionRequestApi';
+import { rolePermissionApi } from './rolePermissionApi';
+import { auditLogApi } from './auditLogApi';
 
 export const api = {
   // 100.인증
@@ -139,6 +151,12 @@ export const api = {
   // 파일 작업 요청
   fileActionRequest: fileActionRequestApi,
   fileActionRequestAdmin: fileActionRequestAdminApi,
+
+  // 809.역할별 권한 매핑
+  rolePermission: rolePermissionApi,
+
+  // 806.감사 로그
+  auditLog: auditLogApi,
 };
 
 export default api;

@@ -15,7 +15,7 @@ export type FileState = 'ACTIVE' | 'TRASHED' | 'DELETED';
 /**
  * 폴더 상태
  */
-export type FolderState = 'ACTIVE' | 'TRASHED';
+export type FolderState = 'ACTIVE' | 'TRASHED' | 'DELETED';
 
 /**
  * 파일 스토리지 가용성 상태
@@ -25,7 +25,7 @@ export type AvailabilityStatus = 'AVAILABLE' | 'SYNCING' | 'UNAVAILABLE' | 'ERRO
 /**
  * 폴더 스토리지 가용성 상태
  */
-export type FolderAvailabilityStatus = 'AVAILABLE' | 'SYNCING' | 'UNAVAILABLE' | 'ERROR';
+export type FolderAvailabilityStatus = 'AVAILABLE' | 'SYNCING' | 'MOVING' | 'UNAVAILABLE' | 'ERROR';
 
 /**
  * 파일 충돌 전략
@@ -46,6 +46,24 @@ export type FolderConflictStrategy = 'ERROR' | 'RENAME';
  * 폴더 이동 충돌 전략
  */
 export type MoveFolderConflictStrategy = 'ERROR' | 'RENAME' | 'SKIP';
+
+// ============================================
+// 공통 - 등록자 정보
+// ============================================
+
+/**
+ * 등록자(생성자) 사용자 정보
+ */
+export interface CreatedByUser {
+  /** 사용자 UUID */
+  id: string;
+  /** 사번 */
+  employeeNumber: string;
+  /** 이름 */
+  name: string;
+  /** 이메일 */
+  email: string;
+}
 
 // ============================================
 // 200.파일 (File)
@@ -211,7 +229,26 @@ export interface FolderListItem {
   storageStatus: FolderStorageStatus;
   fileCount: number;
   folderCount: number;
+  /** 폴더 등록자 정보 */
+  createdBy: CreatedByUser | null;
   updatedAt: string;
+}
+
+/** 파일 PENDING 작업 타입 */
+export type PendingActionType = 'MOVE' | 'DELETE';
+
+/** PENDING 작업 요청 요약 */
+export interface PendingActionRequestSummary {
+  id: string;
+  type: PendingActionType;
+  status: 'PENDING';
+  requestedAt: string;
+}
+
+/** 파일 스토리지 상태 */
+export interface FileStorageStatus {
+  cache: string | null;
+  nas: string | null;
 }
 
 /**
@@ -222,20 +259,12 @@ export interface FileListItemInFolder {
   name: string;
   size: number;
   mimeType: string;
-  storageStatus: {
-    cache: string | null;
-    nas: string | null;
-  };
-  /** 파일 생성자 (업로더) ID */
-  createdBy?: string;
+  storageStatus: FileStorageStatus;
+  /** 파일 등록자 정보 */
+  createdBy: CreatedByUser | null;
   updatedAt: string;
-  /** PENDING 작업 요청 요약 (있으면 표시, 없으면 null) */
-  pendingActionRequest?: {
-    id: string;
-    type: 'MOVE' | 'DELETE';
-    status: 'PENDING';
-    requestedAt: string;
-  } | null;
+  /** 해당 파일에 대한 PENDING 작업 요청 (없으면 null) */
+  pendingActionRequest: PendingActionRequestSummary | null;
 }
 
 /**
@@ -744,6 +773,14 @@ export interface SearchQuery {
   keyword: string;
   /** 검색 대상 타입 (미지정 시 전체 검색) */
   type?: SearchResultType;
+  /** 파일 MIME 타입 필터 (부분 일치, 예: 'image', 'application/pdf') */
+  mimeType?: string;
+  /** 등록자 이름으로 검색 (부분 일치) */
+  createdBy?: string;
+  /** 등록 기간 시작일 (ISO 8601) */
+  createdAtFrom?: string;
+  /** 등록 기간 종료일 (ISO 8601) */
+  createdAtTo?: string;
   /** 정렬 기준 */
   sortBy?: SearchSortBy;
   /** 정렬 순서 */
@@ -783,6 +820,11 @@ export interface SearchFileItem {
   size: number;
   /** MIME 타입 */
   mimeType: string;
+  /** 등록자 ID */
+  createdBy?: string;
+  /** 등록자 이름 */
+  createdByName?: string;
+  createdAt: string;
   updatedAt: string;
 }
 
@@ -807,12 +849,26 @@ export interface SearchResponse {
 // 검색 내역 (Search History)
 // ============================================
 
+/** 검색 내역 타입 */
+export type SearchHistoryType = 'all' | 'file' | 'folder';
+
+/** 검색 내역 조회 쿼리 파라미터 */
+export interface SearchHistoryQuery {
+  /** 페이지 번호 (1부터, 기본: 1) */
+  page?: number;
+  /** 페이지 크기 (1~50, 기본: 20) */
+  pageSize?: number;
+}
+
 /**
  * 검색 내역 아이템
  */
 export interface SearchHistoryItem {
   id: string;
   keyword: string;
+  searchType: SearchHistoryType;
+  filters: Record<string, unknown> | null;
+  resultCount: number;
   searchedAt: string;
 }
 
@@ -821,9 +877,7 @@ export interface SearchHistoryItem {
  */
 export interface SearchHistoryResponse {
   items: SearchHistoryItem[];
-  total: number;
-  page: number;
-  pageSize: number;
+  pagination: PaginationInfo;
 }
 
 /**

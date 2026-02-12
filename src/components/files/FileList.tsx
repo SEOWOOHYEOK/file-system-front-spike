@@ -4,6 +4,14 @@
  */
 import { FileItemList } from './FileItem';
 
+/** 등록자 정보 */
+interface CreatedByInfo {
+  id: string;
+  employeeNumber: string;
+  name: string;
+  email: string;
+}
+
 interface FolderItem {
   id: string;
   name: string;
@@ -11,6 +19,8 @@ interface FolderItem {
   storageStatus: { nas: string | null };
   fileCount: number;
   folderCount: number;
+  /** 폴더 등록자 정보 */
+  createdBy?: CreatedByInfo | null;
   updatedAt: string;
 }
 
@@ -20,8 +30,8 @@ interface FileItem {
   size: number;
   mimeType: string;
   storageStatus: { cache: string | null; nas: string | null };
-  /** 파일 생성자 (업로더) ID */
-  createdBy?: string;
+  /** 파일 등록자 정보 */
+  createdBy?: CreatedByInfo | null;
   updatedAt: string;
 }
 
@@ -148,6 +158,7 @@ export function FileList({
               id={folder.id}
               name={folder.name}
               type="folder"
+              createdBy={folder.createdBy}
               updatedAt={folder.updatedAt}
               folderCount={folder.folderCount}
               fileCount={folder.fileCount}

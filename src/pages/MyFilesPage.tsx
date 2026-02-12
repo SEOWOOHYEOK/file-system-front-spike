@@ -15,6 +15,7 @@ import { FileDownloadManager } from '../components/FileDownloadManager';
 import { FileUploadModal } from '../components/FileUploadModal';
 import {
   FileSidebar,
+  type ViewType,
   FileToolbar,
   BreadcrumbNav,
   FileGrid,
@@ -25,7 +26,10 @@ import {
   TrashView,
   ShareRequestModal,
   FileActionRequestModal,
+  SentSharesView,
+  ReceivedRequestsView,
 } from '../components/files';
+import { mySentShareApi, receivedRequestApi } from '../api/fileShareApi';
 import type {
   FolderContentsResponse,
   BreadcrumbItem,
@@ -41,9 +45,8 @@ import type {
   RecentActivityItem,
 } from '../types/user.types';
 import type { FileActionType } from '../types/file-action-request.types';
+import type { ShareableFile } from '../types/file-share.types';
 
-// 뷰 타입
-type ViewType = 'all' | 'recent' | 'favorites' | 'trash';
 type ViewMode = 'grid' | 'list';
 type SortBy = 'name' | 'updatedAt' | 'size';
 type SortOrder = 'asc' | 'desc';
@@ -158,6 +161,16 @@ export function MyFilesPage() {
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
 
   // ============================================
+  // 파일 공유 카운트 (사이드바용)
+  // ============================================
+  const [sentShareCount, setSentShareCount] = useState(0);
+  const [receivedCounts, setReceivedCounts] = useState({
+    pending: 0,
+    approved: 0,
+    rejected: 0,
+  });
+
+  // ============================================
   // 로딩 상태
   // ============================================
   const [loading, setLoading] = useState({
@@ -211,7 +224,7 @@ export function MyFilesPage() {
   // 공유 요청 모달 상태
   // ============================================
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
-  const [shareFiles, setShareFiles] = useState<Array<{ id: string; name: string }>>([]);
+  const [shareFiles, setShareFiles] = useState<ShareableFile[]>([]);
 
   // ============================================
   // 파일 작업 요청 모달 상태
@@ -306,7 +319,7 @@ export function MyFilesPage() {
     setSearchHistoryLoading(true);
     try {
       const response = await folderApi.getSearchHistory(auth.token, { pageSize: 20 });
-      setSearchHistory(response.items);
+      setSearchHistory(response.items ?? []);
     } catch (error) {
       console.error('Failed to fetch search history:', error);
     } finally {
@@ -674,6 +687,29 @@ export function MyFilesPage() {
   }, [currentView, recentHasNext, recentLoading, loadMoreRecentActivities]);
 
   // ============================================
+  // 파일 공유 카운트 로드
+  // ============================================
+  const loadShareCounts = useCallback(async () => {
+    if (!auth.token) return;
+    try {
+      const [sentResp, pendingResp, approvedResp, rejectedResp] = await Promise.all([
+        mySentShareApi.getList({ page: 1, pageSize: 1 }),
+        receivedRequestApi.getList({ status: 'PENDING', page: 1, pageSize: 1 }),
+        receivedRequestApi.getList({ status: 'APPROVED', page: 1, pageSize: 1 }),
+        receivedRequestApi.getList({ status: 'REJECTED', page: 1, pageSize: 1 }),
+      ]);
+      setSentShareCount(sentResp.totalItems);
+      setReceivedCounts({
+        pending: pendingResp.totalItems,
+        approved: approvedResp.totalItems,
+        rejected: rejectedResp.totalItems,
+      });
+    } catch {
+      /* silent */
+    }
+  }, [auth.token]);
+
+  // ============================================
   // 스토리지 정보
   // ============================================
   const fetchStorageInfo = useCallback(async () => {
@@ -733,7 +769,20 @@ export function MyFilesPage() {
         break;
       case 'share':
         if (item.type === 'file') {
-          setShareFiles([{ id: item.id, name: item.name }]);
+          // 폴더 API의 FileListItemInFolder에서 풍부한 파일 데이터 조회
+          const fileData = folderContents?.files.find(f => f.id === item.id);
+          const shareFile: ShareableFile = fileData
+            ? {
+                id: fileData.id,
+                name: fileData.name,
+                size: fileData.size,
+                mimeType: fileData.mimeType,
+                storageStatus: fileData.storageStatus,
+                pendingActionRequest: fileData.pendingActionRequest,
+                createdBy: fileData.createdBy,
+              }
+            : { id: item.id, name: item.name };
+          setShareFiles([shareFile]);
           setIsShareModalOpen(true);
         }
         break;
@@ -817,6 +866,7 @@ export function MyFilesPage() {
       fetchRootFolder();
       fetchFavorites();
       fetchStorageInfo();
+      loadShareCounts();
     }
   }, [auth.isAuthenticated]);
 
@@ -875,6 +925,8 @@ export function MyFilesPage() {
         currentView={currentView}
         onViewChange={handleViewChange}
         storageInfo={storageInfo}
+        sentShareCount={sentShareCount}
+        receivedCounts={receivedCounts}
       />
 
       {/* 메인 컨텐츠 */}
@@ -918,9 +970,23 @@ export function MyFilesPage() {
             </span>
             <button
               onClick={() => {
-                const fileItems = selectedItems
+                // 폴더 API의 FileListItemInFolder에서 풍부한 파일 데이터 매핑
+                const fileItems: ShareableFile[] = selectedItems
                   .filter(s => s.type === 'file')
-                  .map(s => ({ id: s.id, name: s.name }));
+                  .map(s => {
+                    const fileData = folderContents?.files.find(f => f.id === s.id);
+                    return fileData
+                      ? {
+                          id: fileData.id,
+                          name: fileData.name,
+                          size: fileData.size,
+                          mimeType: fileData.mimeType,
+                          storageStatus: fileData.storageStatus,
+                          pendingActionRequest: fileData.pendingActionRequest,
+                          createdBy: fileData.createdBy,
+                        }
+                      : { id: s.id, name: s.name };
+                  });
                 if (fileItems.length > 0) {
                   setShareFiles(fileItems);
                   setIsShareModalOpen(true);
@@ -979,6 +1045,7 @@ export function MyFilesPage() {
                       storageStatus: { nas: null },
                       fileCount: 0,
                       folderCount: 0,
+                      createdBy: null,
                       updatedAt: r.updatedAt,
                     }))}
                     files={searchResults.results.filter(r => r.type === 'file').map(r => ({
@@ -987,6 +1054,9 @@ export function MyFilesPage() {
                       size: 'size' in r ? r.size : 0,
                       mimeType: 'mimeType' in r ? r.mimeType : '',
                       storageStatus: { cache: null, nas: null },
+                      createdBy: ('createdBy' in r && r.createdBy)
+                        ? { id: r.createdBy, employeeNumber: '', name: ('createdByName' in r ? r.createdByName : '') || '', email: '' }
+                        : null,
                       updatedAt: r.updatedAt,
                     }))}
                     onFolderClick={navigateToFolder}
@@ -1018,6 +1088,7 @@ export function MyFilesPage() {
                       storageStatus: { nas: null },
                       fileCount: 0,
                       folderCount: 0,
+                      createdBy: null,
                       updatedAt: r.updatedAt,
                     }))}
                     files={searchResults.results.filter(r => r.type === 'file').map(r => ({
@@ -1026,6 +1097,9 @@ export function MyFilesPage() {
                       size: 'size' in r ? r.size : 0,
                       mimeType: 'mimeType' in r ? r.mimeType : '',
                       storageStatus: { cache: null, nas: null },
+                      createdBy: ('createdBy' in r && r.createdBy)
+                        ? { id: r.createdBy, employeeNumber: '', name: ('createdByName' in r ? r.createdByName : '') || '', email: '' }
+                        : null,
                       updatedAt: r.updatedAt,
                     }))}
                     onFolderClick={navigateToFolder}
@@ -1154,6 +1228,27 @@ export function MyFilesPage() {
                 </div>
               )}
             </div>
+          )}
+
+          {/* 내가 공유한 파일 뷰 */}
+          {currentView === 'sentShares' && (
+            <SentSharesView />
+          )}
+
+          {/* 받은 요청 뷰 */}
+          {(currentView === 'receivedPending' ||
+            currentView === 'receivedApproved' ||
+            currentView === 'receivedRejected') && (
+            <ReceivedRequestsView
+              statusFilter={
+                currentView === 'receivedPending'
+                  ? 'PENDING'
+                  : currentView === 'receivedApproved'
+                    ? 'APPROVED'
+                    : 'REJECTED'
+              }
+              onCountsChange={loadShareCounts}
+            />
           )}
 
           {/* 최근 활동 뷰 */}
@@ -1460,7 +1555,6 @@ export function MyFilesPage() {
           setIsShareModalOpen(false);
           setShareFiles([]);
         }}
-        token={auth.token || ''}
         files={shareFiles}
       />
 

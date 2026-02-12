@@ -15,21 +15,6 @@ const navItems = [
     icon: '📁',
   },
   {
-    title: '500.관리자',
-    path: '/admin',
-    icon: '⚙️',
-  },
-  {
-    title: '510.관리자-공유',
-    path: '/admin/shares',
-    icon: '📋',
-  },
-  {
-    title: '520.외부사용자',
-    path: '/admin/external-users',
-    icon: '👥',
-  },
-  {
     title: '공유 요청 관리',
     path: '/admin/share-requests',
     icon: '📨',
@@ -55,14 +40,14 @@ const navItems = [
     icon: '📋',
   },
   {
-    title: '600.외부공유',
-    path: '/shares',
-    icon: '🔗',
+    title: '역할별 권한 관리',
+    path: '/admin/role-permissions',
+    icon: '🛡️',
   },
   {
-    title: '700/710.외부접근',
-    path: '/external',
-    icon: '🌐',
+    title: '감사 로그',
+    path: '/admin/audit-logs',
+    icon: '📋',
   },
 ];
 

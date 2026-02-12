@@ -15,10 +15,13 @@ import { AdminExternalUserPage } from './pages/AdminExternalUserPage';
 import { ObservabilityPage } from './pages/ObservabilityPage';
 import { SharePage } from './pages/SharePage';
 import { ExternalPage } from './pages/ExternalPage';
+import { ExternalSharePage } from './pages/ExternalSharePage';
 import { AdminShareRequestPage } from './pages/AdminShareRequestPage';
 import { UserManagementPage } from './pages/UserManagementPage';
 import { SyncDashboardPage } from './pages/SyncDashboardPage';
 import { AdminFileActionRequestPage } from './pages/AdminFileActionRequestPage';
+import { RolePermissionPage } from './pages/RolePermissionPage';
+import { AuditLogPage } from './pages/AuditLogPage';
 
 function App() {
   return (
@@ -27,6 +30,8 @@ function App() {
         <Routes>
           {/* 로그인 (비인증) */}
           <Route path="/login" element={<LoginPage />} />
+          {/* 외부 사용자 공유 파일함 (710) - 외부 인증 전용 */}
+          <Route path="/external-share" element={<ExternalSharePage />} />
 
           {/* 인증 필요 라우트 */}
           <Route
@@ -47,6 +52,8 @@ function App() {
             <Route path="admin/user-management" element={<UserManagementPage />} />
             <Route path="admin/sync-dashboard" element={<SyncDashboardPage />} />
             <Route path="admin/file-action-requests" element={<AdminFileActionRequestPage />} />
+            <Route path="admin/role-permissions" element={<RolePermissionPage />} />
+            <Route path="admin/audit-logs" element={<AuditLogPage />} />
             <Route path="shares" element={<SharePage />} />
             <Route path="external" element={<ExternalPage />} />
           </Route>

@@ -172,14 +172,22 @@ export function FileItemGrid({
   );
 }
 
+/** 등록자 정보 (FileItemList용) */
+interface CreatedByInfo {
+  id: string;
+  employeeNumber: string;
+  name: string;
+  email: string;
+}
+
 interface FileItemListProps {
   id: string;
   name: string;
   type: 'file' | 'folder';
   mimeType?: string;
   size?: number;
-  /** 파일 생성자 (업로더) ID */
-  createdBy?: string;
+  /** 등록자 정보 */
+  createdBy?: CreatedByInfo | null;
   updatedAt: string;
   folderCount?: number;
   fileCount?: number;
@@ -258,10 +266,12 @@ export function FileItemList({
         )}
       </td>
       <td className="px-4 py-3 text-sm text-gray-500">
-        {type === 'folder' ? (
-          <span className="text-gray-400">-</span>
+        {createdBy ? (
+          <span title={`${createdBy.name} (${createdBy.employeeNumber})`}>
+            {createdBy.name}
+          </span>
         ) : (
-          <span title={createdBy}>{createdBy || '-'}</span>
+          <span className="text-gray-400">-</span>
         )}
       </td>
       <td className="px-4 py-3 text-sm text-gray-500">

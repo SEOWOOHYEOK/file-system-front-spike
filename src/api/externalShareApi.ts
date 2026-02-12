@@ -156,7 +156,7 @@ export const getMyShares = async (
 ): Promise<PaginatedResponse<PublicShare>> => {
   const response = await apiCall<PaginatedResponse<PublicShare>>(
     'GET',
-    '/ext/shares',
+    '/file-shares-requests/me',
     { ...authHeader(accessToken), params },
   );
   return response.data;
@@ -171,7 +171,7 @@ export const getShareDetail = async (
 ): Promise<ShareDetailResponse> => {
   const response = await apiCall<ShareDetailResponse>(
     'GET',
-    `/ext/shares/${shareId}`,
+    `/file-shares-requests/${shareId}`,
     authHeader(accessToken),
   );
   return response.data;
@@ -185,7 +185,7 @@ export const getContent = async (
   shareId: string,
   contentToken: string,
 ): Promise<Blob> => {
-  const response = await axios.get(`${API_BASE}/ext/shares/${shareId}/content`, {
+  const response = await axios.get(`${API_BASE}/file-shares-requests/${shareId}/content`, {
     ...authHeader(accessToken),
     params: { token: contentToken },
     responseType: 'blob',
@@ -201,7 +201,7 @@ export const downloadFile = async (
   shareId: string,
   contentToken: string,
 ): Promise<{ blob: Blob; filename: string }> => {
-  const response = await axios.get(`${API_BASE}/ext/shares/${shareId}/download`, {
+  const response = await axios.get(`${API_BASE}/file-shares-requests/${shareId}/download`, {
     ...authHeader(accessToken),
     params: { token: contentToken },
     responseType: 'blob',
@@ -233,7 +233,7 @@ export const downloadFileWithMetadata = async (
   shareId: string,
   contentToken: string,
 ): Promise<ExtDownloadResponse> => {
-  const response = await axios.get(`${API_BASE}/ext/shares/${shareId}/download`, {
+  const response = await axios.get(`${API_BASE}/file-shares-requests/${shareId}/download`, {
     ...authHeader(accessToken),
     params: { token: contentToken },
     responseType: 'blob',
@@ -294,7 +294,7 @@ export const downloadFileWithRange = async (
     headers['If-Range'] = `"${options.ifRange}"`;
   }
 
-  const response = await axios.get(`${API_BASE}/ext/shares/${shareId}/download`, {
+  const response = await axios.get(`${API_BASE}/file-shares-requests/${shareId}/download`, {
     headers,
     params: { token: contentToken },
     responseType: 'blob',
@@ -360,7 +360,7 @@ export const downloadFileWithProgress = async (
   contentToken: string,
   onProgress: (percent: number, downloadedBytes: number, totalBytes: number) => void,
 ): Promise<ExtDownloadResponse> => {
-  const url = `${API_BASE}/ext/shares/${shareId}/download?token=${encodeURIComponent(contentToken)}`;
+  const url = `${API_BASE}/file-shares-requests/${shareId}/download?token=${encodeURIComponent(contentToken)}`;
   
   const response = await fetch(url, {
     headers: { Authorization: `Bearer ${accessToken}` },
@@ -431,7 +431,7 @@ export const resumeDownload = async (
   progress: ExtDownloadProgress,
   onProgress?: (percent: number, downloadedBytes: number, totalBytes: number) => void,
 ): Promise<{ blob: Blob; isRestarted: boolean; etag: string; checksum?: string }> => {
-  const url = `${API_BASE}/ext/shares/${shareId}/download?token=${encodeURIComponent(contentToken)}`;
+  const url = `${API_BASE}/file-shares-requests/${shareId}/download?token=${encodeURIComponent(contentToken)}`;
   
   const headers: Record<string, string> = {
     Authorization: `Bearer ${accessToken}`,
@@ -532,7 +532,7 @@ export const getContentWithMetadata = async (
   shareId: string,
   contentToken: string,
 ): Promise<ExtDownloadResponse> => {
-  const response = await axios.get(`${API_BASE}/ext/shares/${shareId}/content`, {
+  const response = await axios.get(`${API_BASE}/file-shares-requests/${shareId}/content`, {
     ...authHeader(accessToken),
     params: { token: contentToken },
     responseType: 'blob',

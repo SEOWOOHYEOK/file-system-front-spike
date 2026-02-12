@@ -4,6 +4,14 @@
  */
 import { FileItemGrid } from './FileItem';
 
+/** 등록자 정보 */
+interface CreatedByInfo {
+  id: string;
+  employeeNumber: string;
+  name: string;
+  email: string;
+}
+
 interface FolderItem {
   id: string;
   name: string;
@@ -11,6 +19,8 @@ interface FolderItem {
   storageStatus: { nas: string | null };
   fileCount: number;
   folderCount: number;
+  /** 폴더 등록자 정보 */
+  createdBy?: CreatedByInfo | null;
   updatedAt: string;
 }
 

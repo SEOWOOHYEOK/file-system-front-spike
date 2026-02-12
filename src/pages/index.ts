@@ -5,5 +5,7 @@ export { AdminSharePage } from './AdminSharePage';
 export { AdminExternalUserPage } from './AdminExternalUserPage';
 export { SharePage } from './SharePage';
 export { ExternalPage } from './ExternalPage';
+export { ExternalSharePage } from './ExternalSharePage';
 export { AdminShareRequestPage } from './AdminShareRequestPage';
 export { UserManagementPage } from './UserManagementPage';
+export { AuditLogPage } from './AuditLogPage';
