@@ -218,6 +218,73 @@ export interface FileShareRequestListQuery {
   sortOrder?: 'asc' | 'desc';
 }
 
+// ─── Q-3, Q-4: 그룹 목록 타입 (2026-02-12 추가) ───
+
+/** 그룹 목록 조회 쿼리 파라미터 (Q-3, Q-4 공통) */
+export interface GroupListQuery {
+  status?: ShareRequestStatus;
+  q?: string;
+  page?: number;
+  pageSize?: number;
+  sortBy?: string;
+  sortOrder?: 'asc' | 'desc';
+}
+
+/** 요청 간략 정보 (그룹 목록의 중첩 아이템) */
+export interface ShareRequestBrief {
+  id: string;
+  status: ShareRequestStatus;
+  requester: InternalUserDetail;
+  targets: UserDetail[];
+  permission: string;
+  maxDownloads?: number;
+  currentDownloadCount?: number;
+  currentViewCount?: number;
+  startAt: string;
+  endAt: string;
+  requestedAt: string;
+  reason: string;
+  approver?: InternalUserDetail;
+  decidedAt?: string;
+}
+
+/** 그룹 요약 정보 (파일별/대상자별 공통) */
+export interface GroupSummary {
+  totalRequestCount: number;
+  pendingCount: number;
+  approvedCount: number;
+  rejectedCount: number;
+  canceledCount: number;
+  activeShareCount: number;
+}
+
+/** 파일별 그룹 아이템 (Q-3) */
+export interface FileGroupItem {
+  file: {
+    id: string;
+    name: string;
+    path: string;
+    mimeType: string;
+  };
+  summary: GroupSummary;
+  latestRequestedAt: string;
+  requests: ShareRequestBrief[];
+}
+
+/** 대상자별 그룹 아이템 (Q-4) */
+export interface TargetGroupItem {
+  target: UserDetail;
+  summary: GroupSummary;
+  latestRequestedAt: string;
+  requests: ShareRequestBrief[];
+}
+
+/** 파일별 그룹 목록 응답 (Q-3) */
+export type FileGroupListResponse = PaginatedResponse<FileGroupItem>;
+
+/** 대상자별 그룹 목록 응답 (Q-4) */
+export type TargetGroupListResponse = PaginatedResponse<TargetGroupItem>;
+
 // ─── API 호출 래퍼 ───
 
 async function apiGet<T>(
@@ -320,4 +387,48 @@ export const adminFileShareRequestApi = {
       token,
       query as Record<string, unknown>,
     ),
+
+  /**
+   * Q-3: 파일별 전체 목록 조회 (그룹핑)
+   * GET /v1/admin/file-shares-requests/files
+   */
+  getFileGroupList: (
+    token: string,
+    query?: GroupListQuery,
+  ): Promise<FileGroupListResponse> => {
+    const params: Record<string, unknown> = {};
+    if (query?.status) params.status = query.status;
+    if (query?.q) params.q = query.q;
+    if (query?.page) params.page = query.page;
+    if (query?.pageSize) params.pageSize = query.pageSize;
+    if (query?.sortBy) params.sortBy = query.sortBy;
+    if (query?.sortOrder) params.sortOrder = query.sortOrder;
+    return apiGet<FileGroupListResponse>(
+      '/admin/file-shares-requests/files',
+      token,
+      params,
+    );
+  },
+
+  /**
+   * Q-4: 대상자별 전체 목록 조회 (그룹핑)
+   * GET /v1/admin/file-shares-requests/targets
+   */
+  getTargetGroupList: (
+    token: string,
+    query?: GroupListQuery,
+  ): Promise<TargetGroupListResponse> => {
+    const params: Record<string, unknown> = {};
+    if (query?.status) params.status = query.status;
+    if (query?.q) params.q = query.q;
+    if (query?.page) params.page = query.page;
+    if (query?.pageSize) params.pageSize = query.pageSize;
+    if (query?.sortBy) params.sortBy = query.sortBy;
+    if (query?.sortOrder) params.sortOrder = query.sortOrder;
+    return apiGet<TargetGroupListResponse>(
+      '/admin/file-shares-requests/targets',
+      token,
+      params,
+    );
+  },
 };

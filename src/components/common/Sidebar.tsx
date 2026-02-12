@@ -62,6 +62,11 @@ const navItems = [
     icon: '📋',
   },
   {
+    title: '받은 공유 요청(702)',
+    path: '/my-received-requests',
+    icon: '📬',
+  },
+  {
     title: '나에게 공유된 파일(710)',
     path: '/external-file-access',
     icon: '📥',

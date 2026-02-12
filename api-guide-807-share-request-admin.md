@@ -20,8 +20,10 @@
 10. [API 상세 - 일괄 반려 (A-7)](#10-api-상세---일괄-반려-a-7)
 11. [API 상세 - 대상자별 공유 조회 (Q-1)](#11-api-상세---대상자별-공유-조회-q-1)
 12. [API 상세 - 파일별 공유 조회 (Q-2)](#12-api-상세---파일별-공유-조회-q-2)
-13. [에러 처리](#13-에러-처리)
-14. [cURL 테스트](#14-curl-테스트)
+13. [API 상세 - 파일별 전체 목록 조회 (Q-3)](#13-api-상세---파일별-전체-목록-조회-q-3) <!-- 2026-02-12 추가 -->
+14. [API 상세 - 대상자별 전체 목록 조회 (Q-4)](#14-api-상세---대상자별-전체-목록-조회-q-4) <!-- 2026-02-12 추가 -->
+15. [에러 처리](#15-에러-처리)
+16. [cURL 테스트](#16-curl-테스트)
 
 ---
 
@@ -38,6 +40,8 @@
 | `POST` | `/v1/admin/file-shares-requests/bulk-reject` | 일괄 반려 | `FILE_SHARE_APPROVE` |
 | `GET` | `/v1/admin/file-shares-requests/by-target/:userId` | 대상자별 공유 조회 | `FILE_SHARE_READ` |
 | `GET` | `/v1/admin/file-shares-requests/by-file/:fileId` | 파일별 공유 조회 | `FILE_SHARE_READ` |
+| `GET` | `/v1/admin/file-shares-requests/files` | 파일별 전체 목록 조회 (그룹핑) | `FILE_SHARE_READ` | <!-- 2026-02-12 추가 -->
+| `GET` | `/v1/admin/file-shares-requests/targets` | 대상자별 전체 목록 조회 (그룹핑) | `FILE_SHARE_READ` | <!-- 2026-02-12 추가 -->
 
 ---
 
@@ -343,6 +347,74 @@ interface SharesByFileResponse extends PaginatedResponse<ShareItemResult> {
     totalDownloadCount: number;
   };
 }
+
+// ── 2026-02-12 추가: Q-3, Q-4 그룹 목록 타입 ──
+
+/** 그룹 목록 조회 쿼리 파라미터 (Q-3, Q-4 공통) */
+interface GroupListQuery {
+  status?: ShareRequestStatus;    // 선택 - 미지정 시 전체
+  q?: string;                     // 검색어 (Q-3: 파일명, Q-4: 대상자 이름/이메일)
+  page?: number;                  // 페이지 번호 (기본값: 1)
+  pageSize?: number;              // 페이지 크기 (기본값: 20, 최대: 100)
+  sortBy?: string;                // 정렬 기준 (Q-3: latestRequestedAt, fileName, requestCount)
+                                  //           (Q-4: latestRequestedAt, targetName, requestCount)
+  sortOrder?: 'asc' | 'desc';    // 정렬 순서 (기본값: desc)
+}
+
+/** 요청 간략 정보 (그룹 목록의 중첩 아이템) */
+interface ShareRequestBrief {
+  id: string;                       // 요청 ID (UUID)
+  status: ShareRequestStatus;
+  requester: InternalUserDetail;    // 요청자
+  targets: UserDetail[];            // 대상자들
+  permission: string;               // 'VIEW' | 'DOWNLOAD'
+  maxDownloads?: number;            // 최대 다운로드 허용 횟수
+  currentDownloadCount?: number;    // 현재 다운로드 횟수 (승인 후 활성 공유에서)
+  currentViewCount?: number;        // 현재 열람 횟수 (승인 후 활성 공유에서)
+  startAt: string;                  // ISO 8601
+  endAt: string;                    // ISO 8601
+  requestedAt: string;              // ISO 8601
+  reason: string;
+  approver?: InternalUserDetail;
+  decidedAt?: string;               // ISO 8601
+}
+
+/** 그룹 요약 정보 (파일별/대상자별 공통) */
+interface GroupSummary {
+  totalRequestCount: number;        // 전체 요청 건수
+  pendingCount: number;             // 대기 중
+  approvedCount: number;            // 승인됨
+  rejectedCount: number;            // 반려됨
+  canceledCount: number;            // 취소됨
+  activeShareCount: number;         // 현재 활성 공유 수
+}
+
+/** 파일별 그룹 아이템 (Q-3) */
+interface FileGroupItem {
+  file: {
+    id: string;       // UUID
+    name: string;
+    path: string;
+    mimeType: string;
+  };
+  summary: GroupSummary;
+  latestRequestedAt: string;        // ISO 8601
+  requests: ShareRequestBrief[];    // 관련 요청 목록 (중첩)
+}
+
+/** 대상자별 그룹 아이템 (Q-4) */
+interface TargetGroupItem {
+  target: UserDetail;               // 내부 또는 외부 사용자
+  summary: GroupSummary;
+  latestRequestedAt: string;        // ISO 8601
+  requests: ShareRequestBrief[];    // 관련 요청 목록 (중첩)
+}
+
+/** 파일별 그룹 목록 응답 (Q-3) */
+interface FileGroupListResponse extends PaginatedResponse<FileGroupItem> {}
+
+/** 대상자별 그룹 목록 응답 (Q-4) */
+interface TargetGroupListResponse extends PaginatedResponse<TargetGroupItem> {}
 ```
 
 ---
@@ -1455,7 +1527,471 @@ async function getSharesByFile(
 
 ---
 
-## 13. 에러 처리
+<!-- 2026-02-12 추가: Q-3 파일별 전체 목록 조회 -->
+## 13. API 상세 - 파일별 전체 목록 조회 (Q-3)
+
+### 기본 정보
+
+| 항목 | 값 |
+|------|-----|
+| Method | `GET` |
+| Path | `/v1/admin/file-shares-requests/files` |
+| 인증 | Bearer Token |
+| 권한 | `FILE_SHARE_READ` |
+
+### 설명
+
+공유 요청에 포함된 **모든 파일**을 그룹핑하여 조회합니다. 각 파일이 주 행이고, 하위에 해당 파일과 관련된 요청 목록이 중첩됩니다.
+
+- Q-2(`by-file/:fileId`)와 달리 **특정 파일 ID 없이 전체 목록**을 조회합니다.
+- 상태 필터는 선택적이며, 미지정 시 전체 상태를 포함합니다.
+- 페이지네이션은 **파일 단위**로 적용됩니다.
+
+### 쿼리 파라미터
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `status` | `ShareRequestStatus` | 선택 | 전체 | 요청 상태 필터 |
+| `q` | `string` | 선택 | - | 파일명 검색어 |
+| `page` | `number` | 선택 | `1` | 페이지 번호 |
+| `pageSize` | `number` | 선택 | `20` | 페이지 크기 (최대 100) |
+| `sortBy` | `string` | 선택 | `latestRequestedAt` | 정렬 기준 (`latestRequestedAt`, `fileName`, `requestCount`) |
+| `sortOrder` | `'asc' \| 'desc'` | 선택 | `desc` | 정렬 순서 |
+
+### 응답 예시
+
+```json
+{
+  "items": [
+    {
+      "file": {
+        "id": "550e8400-e29b-41d4-a716-446655440010",
+        "name": "Product_Roadmap_2025.xlsx",
+        "path": "/Products/Roadmaps",
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      },
+      "summary": {
+        "totalRequestCount": 5,
+        "pendingCount": 2,
+        "approvedCount": 2,
+        "rejectedCount": 1,
+        "canceledCount": 0,
+        "activeShareCount": 2
+      },
+      "latestRequestedAt": "2026-02-11T14:00:00.000Z",
+      "requests": [
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440001",
+          "status": "PENDING",
+          "requester": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440002",
+            "name": "홍길동",
+            "email": "hong@company.com",
+            "department": "개발팀",
+            "position": "선임"
+          },
+          "targets": [
+            {
+              "type": "EXTERNAL_USER",
+              "userId": "550e8400-e29b-41d4-a716-446655440050",
+              "name": "investor",
+              "email": "investor@venture-capital.com",
+              "company": "벤처캐피탈"
+            }
+          ],
+          "permission": "DOWNLOAD",
+          "maxDownloads": 5,
+          "startAt": "2026-02-04T00:00:00.000Z",
+          "endAt": "2026-03-04T23:59:59.000Z",
+          "requestedAt": "2026-02-11T14:00:00.000Z",
+          "reason": "외부 투자사에게 제품 로드맵 공유"
+        },
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440005",
+          "status": "APPROVED",
+          "requester": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440006",
+            "name": "최영수",
+            "email": "choi@company.com",
+            "department": "영업팀"
+          },
+          "targets": [
+            {
+              "type": "EXTERNAL_USER",
+              "userId": "550e8400-e29b-41d4-a716-446655440051",
+              "name": "partner",
+              "email": "partner@strategic-ally.com",
+              "company": "전략적파트너"
+            }
+          ],
+          "permission": "DOWNLOAD",
+          "maxDownloads": 2,
+          "currentDownloadCount": 1,
+          "currentViewCount": 3,
+          "startAt": "2026-01-31T00:00:00.000Z",
+          "endAt": "2026-02-28T23:59:59.000Z",
+          "requestedAt": "2026-01-31T09:00:00.000Z",
+          "reason": "파트너사와 제품 로드맵 공유",
+          "approver": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440003",
+            "name": "최지원",
+            "email": "jiwon@company.com",
+            "department": "보안팀"
+          },
+          "decidedAt": "2026-01-31T10:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 5,
+  "totalPages": 1,
+  "hasNext": false,
+  "hasPrev": false
+}
+```
+
+### fetch 예시
+
+```typescript
+async function getFileGroupList(
+  query: GroupListQuery = {},
+): Promise<FileGroupListResponse> {
+  const params = new URLSearchParams();
+  if (query.status) params.set('status', query.status);
+  if (query.q) params.set('q', query.q);
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('pageSize', String(query.pageSize));
+  if (query.sortBy) params.set('sortBy', query.sortBy);
+  if (query.sortOrder) params.set('sortOrder', query.sortOrder);
+
+  const response = await fetch(
+    `/v1/admin/file-shares-requests/files?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+```
+
+### 프론트엔드 활용 예시
+
+```typescript
+/** 파일별 그룹 아이템 렌더링 */
+function renderFileGroup(item: FileGroupItem) {
+  return {
+    // 주 행: 파일 정보 + 요약
+    fileName: item.file.name,
+    mimeType: item.file.mimeType,
+    totalRequests: item.summary.totalRequestCount,
+    pendingBadge: item.summary.pendingCount > 0 ? `대기 ${item.summary.pendingCount}` : null,
+    approvedBadge: item.summary.approvedCount > 0 ? `승인 ${item.summary.approvedCount}` : null,
+    activeShares: item.summary.activeShareCount,
+    lastRequested: item.latestRequestedAt,
+
+    // 펼침 영역: 관련 요청 목록
+    expandedRequests: item.requests.map((req) => ({
+      id: req.id,
+      status: req.status,
+      requesterName: req.requester.name,
+      requesterDept: req.requester.department,
+      targetNames: req.targets.map((t) => t.name).join(', '),
+      permission: req.permission,
+      downloadInfo: req.permission === 'DOWNLOAD'
+        ? `${req.currentDownloadCount ?? 0}/${req.maxDownloads ?? '∞'}`
+        : '-',
+      period: `${req.startAt} ~ ${req.endAt}`,
+      requestedAt: req.requestedAt,
+    })),
+  };
+}
+```
+
+### 에러 응답
+
+| 상태 코드 | 설명 |
+|-----------|------|
+| `401` | 인증 필요 |
+| `403` | 관리자 권한 필요 |
+
+---
+
+<!-- 2026-02-12 추가: Q-4 대상자별 전체 목록 조회 -->
+## 14. API 상세 - 대상자별 전체 목록 조회 (Q-4)
+
+### 기본 정보
+
+| 항목 | 값 |
+|------|-----|
+| Method | `GET` |
+| Path | `/v1/admin/file-shares-requests/targets` |
+| 인증 | Bearer Token |
+| 권한 | `FILE_SHARE_READ` |
+
+### 설명
+
+공유 요청의 **모든 대상자**를 그룹핑하여 조회합니다. 각 대상자가 주 행이고, 하위에 해당 대상자와 관련된 요청 목록이 중첩됩니다.
+
+- Q-1(`by-target/:userId`)과 달리 **특정 사용자 ID 없이 전체 목록**을 조회합니다.
+- 상태 필터는 선택적이며, 미지정 시 전체 상태를 포함합니다.
+- 페이지네이션은 **대상자 단위**로 적용됩니다.
+
+### 쿼리 파라미터
+
+| 파라미터 | 타입 | 필수 | 기본값 | 설명 |
+|----------|------|------|--------|------|
+| `status` | `ShareRequestStatus` | 선택 | 전체 | 요청 상태 필터 |
+| `q` | `string` | 선택 | - | 대상자 이름/이메일 검색어 |
+| `page` | `number` | 선택 | `1` | 페이지 번호 |
+| `pageSize` | `number` | 선택 | `20` | 페이지 크기 (최대 100) |
+| `sortBy` | `string` | 선택 | `latestRequestedAt` | 정렬 기준 (`latestRequestedAt`, `targetName`, `requestCount`) |
+| `sortOrder` | `'asc' \| 'desc'` | 선택 | `desc` | 정렬 순서 |
+
+### 응답 예시
+
+```json
+{
+  "items": [
+    {
+      "target": {
+        "type": "EXTERNAL_USER",
+        "userId": "550e8400-e29b-41d4-a716-446655440050",
+        "name": "investor",
+        "email": "investor@venture-capital.com",
+        "company": "벤처캐피탈",
+        "department": "투자부"
+      },
+      "summary": {
+        "totalRequestCount": 3,
+        "pendingCount": 1,
+        "approvedCount": 1,
+        "rejectedCount": 1,
+        "canceledCount": 0,
+        "activeShareCount": 1
+      },
+      "latestRequestedAt": "2026-02-11T14:00:00.000Z",
+      "requests": [
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440001",
+          "status": "PENDING",
+          "requester": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440002",
+            "name": "홍길동",
+            "email": "hong@company.com",
+            "department": "개발팀",
+            "position": "선임"
+          },
+          "targets": [
+            {
+              "type": "EXTERNAL_USER",
+              "userId": "550e8400-e29b-41d4-a716-446655440050",
+              "name": "investor",
+              "email": "investor@venture-capital.com",
+              "company": "벤처캐피탈"
+            }
+          ],
+          "permission": "DOWNLOAD",
+          "maxDownloads": 5,
+          "startAt": "2026-02-04T00:00:00.000Z",
+          "endAt": "2026-03-04T23:59:59.000Z",
+          "requestedAt": "2026-02-11T14:00:00.000Z",
+          "reason": "외부 투자사에게 제품 로드맵 공유"
+        },
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440010",
+          "status": "APPROVED",
+          "requester": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440006",
+            "name": "최영수",
+            "email": "choi@company.com",
+            "department": "영업팀"
+          },
+          "targets": [
+            {
+              "type": "EXTERNAL_USER",
+              "userId": "550e8400-e29b-41d4-a716-446655440050",
+              "name": "investor",
+              "email": "investor@venture-capital.com",
+              "company": "벤처캐피탈"
+            }
+          ],
+          "permission": "VIEW",
+          "currentDownloadCount": 0,
+          "currentViewCount": 5,
+          "startAt": "2026-01-20T00:00:00.000Z",
+          "endAt": "2026-02-20T23:59:59.000Z",
+          "requestedAt": "2026-01-20T10:00:00.000Z",
+          "reason": "분기 실적 보고서 공유",
+          "approver": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440003",
+            "name": "최지원",
+            "email": "jiwon@company.com",
+            "department": "보안팀"
+          },
+          "decidedAt": "2026-01-20T11:00:00.000Z"
+        }
+      ]
+    },
+    {
+      "target": {
+        "type": "EXTERNAL_USER",
+        "userId": "550e8400-e29b-41d4-a716-446655440051",
+        "name": "partner",
+        "email": "partner@strategic-ally.com",
+        "company": "전략적파트너"
+      },
+      "summary": {
+        "totalRequestCount": 1,
+        "pendingCount": 0,
+        "approvedCount": 1,
+        "rejectedCount": 0,
+        "canceledCount": 0,
+        "activeShareCount": 1
+      },
+      "latestRequestedAt": "2026-01-31T09:00:00.000Z",
+      "requests": [
+        {
+          "id": "550e8400-e29b-41d4-a716-446655440005",
+          "status": "APPROVED",
+          "requester": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440006",
+            "name": "최영수",
+            "email": "choi@company.com",
+            "department": "영업팀"
+          },
+          "targets": [
+            {
+              "type": "EXTERNAL_USER",
+              "userId": "550e8400-e29b-41d4-a716-446655440051",
+              "name": "partner",
+              "email": "partner@strategic-ally.com",
+              "company": "전략적파트너"
+            }
+          ],
+          "permission": "DOWNLOAD",
+          "maxDownloads": 2,
+          "currentDownloadCount": 1,
+          "currentViewCount": 3,
+          "startAt": "2026-01-31T00:00:00.000Z",
+          "endAt": "2026-02-28T23:59:59.000Z",
+          "requestedAt": "2026-01-31T09:00:00.000Z",
+          "reason": "파트너사와 제품 로드맵 공유",
+          "approver": {
+            "type": "INTERNAL_USER",
+            "userId": "550e8400-e29b-41d4-a716-446655440003",
+            "name": "최지원",
+            "email": "jiwon@company.com",
+            "department": "보안팀"
+          },
+          "decidedAt": "2026-01-31T10:00:00.000Z"
+        }
+      ]
+    }
+  ],
+  "page": 1,
+  "pageSize": 20,
+  "totalItems": 9,
+  "totalPages": 1,
+  "hasNext": false,
+  "hasPrev": false
+}
+```
+
+### fetch 예시
+
+```typescript
+async function getTargetGroupList(
+  query: GroupListQuery = {},
+): Promise<TargetGroupListResponse> {
+  const params = new URLSearchParams();
+  if (query.status) params.set('status', query.status);
+  if (query.q) params.set('q', query.q);
+  if (query.page) params.set('page', String(query.page));
+  if (query.pageSize) params.set('pageSize', String(query.pageSize));
+  if (query.sortBy) params.set('sortBy', query.sortBy);
+  if (query.sortOrder) params.set('sortOrder', query.sortOrder);
+
+  const response = await fetch(
+    `/v1/admin/file-shares-requests/targets?${params.toString()}`,
+    {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  return response.json();
+}
+```
+
+### 프론트엔드 활용 예시
+
+```typescript
+/** 대상자별 그룹 아이템 렌더링 */
+function renderTargetGroup(item: TargetGroupItem) {
+  const isExternal = item.target.type === 'EXTERNAL_USER';
+
+  return {
+    // 주 행: 대상자 정보 + 요약
+    targetName: item.target.name,
+    targetEmail: item.target.email,
+    targetType: isExternal ? '외부' : '내부',
+    company: isExternal ? (item.target as ExternalUserDetail).company : '-',
+    totalRequests: item.summary.totalRequestCount,
+    pendingBadge: item.summary.pendingCount > 0 ? `대기 ${item.summary.pendingCount}` : null,
+    activeShares: item.summary.activeShareCount,
+    lastRequested: item.latestRequestedAt,
+
+    // 펼침 영역: 관련 요청 목록
+    expandedRequests: item.requests.map((req) => ({
+      id: req.id,
+      status: req.status,
+      requesterName: req.requester.name,
+      requesterDept: req.requester.department,
+      permission: req.permission,
+      downloadInfo: req.permission === 'DOWNLOAD'
+        ? `${req.currentDownloadCount ?? 0}/${req.maxDownloads ?? '∞'}`
+        : '-',
+      period: `${req.startAt} ~ ${req.endAt}`,
+      requestedAt: req.requestedAt,
+      reason: req.reason,
+    })),
+  };
+}
+```
+
+### 에러 응답
+
+| 상태 코드 | 설명 |
+|-----------|------|
+| `401` | 인증 필요 |
+| `403` | 관리자 권한 필요 |
+
+---
+
+## 15. 에러 처리
 
 ### 공통 에러 코드
 
@@ -1517,7 +2053,7 @@ async function handleApiError(response: Response): Promise<never> {
 
 ---
 
-## 14. cURL 테스트
+## 16. cURL 테스트
 
 > 아래 명령에서 `${TOKEN}`을 실제 JWT 토큰으로 교체하세요.
 
@@ -1602,5 +2138,39 @@ curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/by-target/55
 
 ```bash
 curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/by-file/550e8400-e29b-41d4-a716-446655440010?page=1&pageSize=20" \
+  -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+<!-- 2026-02-12 추가: Q-3, Q-4 cURL 예시 -->
+
+### Q-3: 파일별 전체 목록 조회
+
+```bash
+# 전체 파일 목록 (기본)
+curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/files?page=1&pageSize=20" \
+  -H "Authorization: Bearer ${TOKEN}" | jq
+
+# PENDING 상태만 필터 + 파일명 검색
+curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/files?status=PENDING&q=보고서&sortBy=fileName&sortOrder=asc" \
+  -H "Authorization: Bearer ${TOKEN}" | jq
+
+# 요청 건수 많은 순서로 정렬
+curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/files?sortBy=requestCount&sortOrder=desc" \
+  -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+### Q-4: 대상자별 전체 목록 조회
+
+```bash
+# 전체 대상자 목록 (기본)
+curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/targets?page=1&pageSize=20" \
+  -H "Authorization: Bearer ${TOKEN}" | jq
+
+# PENDING 상태만 필터 + 대상자명 검색
+curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/targets?status=PENDING&q=investor&sortBy=targetName&sortOrder=asc" \
+  -H "Authorization: Bearer ${TOKEN}" | jq
+
+# 요청 건수 많은 순서로 정렬
+curl -s -X GET "http://localhost:3000/v1/admin/file-shares-requests/targets?sortBy=requestCount&sortOrder=desc" \
   -H "Authorization: Bearer ${TOKEN}" | jq
 ```

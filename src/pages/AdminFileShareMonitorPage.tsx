@@ -8,6 +8,8 @@
  *  A-3: GET /v1/admin/file-shares-requests/:id          (상세 조회)
  *  Q-1: GET /v1/admin/file-shares-requests/by-target/:userId (대상자별)
  *  Q-2: GET /v1/admin/file-shares-requests/by-file/:fileId   (파일별)
+ *  Q-3: GET /v1/admin/file-shares-requests/files        (파일별 전체 목록 그룹핑)
+ *  Q-4: GET /v1/admin/file-shares-requests/targets      (대상자별 전체 목록 그룹핑)
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useInternalAuth } from '../hooks/useInternalAuth';
@@ -22,6 +24,14 @@ import {
   type SharesByTargetResponse,
   type SharesByFileResponse,
   type ShareItemResult,
+  type GroupListQuery,
+  type FileGroupItem,
+  type FileGroupListResponse,
+  type TargetGroupItem,
+  type TargetGroupListResponse,
+  type ShareRequestBrief,
+  type GroupSummary,
+  type ExternalUserDetail,
 } from '../api/adminFileShareRequestApi';
 
 // ─── 상수 ───
@@ -69,7 +79,7 @@ function formatBytes(bytes: number): string {
 }
 
 // ─── 서브 쿼리 탭 ───
-type SubQueryTab = 'list' | 'byTarget' | 'byFile';
+type SubQueryTab = 'list' | 'byTarget' | 'byFile' | 'fileGroupList' | 'targetGroupList';
 
 // ─── 메인 컴포넌트 ───
 
@@ -94,6 +104,22 @@ export function AdminFileShareMonitorPage() {
   const [targetData, setTargetData] = useState<SharesByTargetResponse | null>(null);
   const [fileData, setFileData] = useState<SharesByFileResponse | null>(null);
   const [subPage, setSubPage] = useState(1);
+
+  // Q-3: 파일별 전체 목록 상태
+  const [fileGroupData, setFileGroupData] = useState<FileGroupListResponse | null>(null);
+  const [fileGroupQuery, setFileGroupQuery] = useState('');
+  const [fileGroupStatus, setFileGroupStatus] = useState<ShareRequestStatus | ''>('');
+  const [fileGroupPage, setFileGroupPage] = useState(1);
+  const [fileGroupSortBy, setFileGroupSortBy] = useState('latestRequestedAt');
+  const [expandedFileIds, setExpandedFileIds] = useState<Set<string>>(new Set());
+
+  // Q-4: 대상자별 전체 목록 상태
+  const [targetGroupData, setTargetGroupData] = useState<TargetGroupListResponse | null>(null);
+  const [targetGroupQuery, setTargetGroupQuery] = useState('');
+  const [targetGroupStatus, setTargetGroupStatus] = useState<ShareRequestStatus | ''>('');
+  const [targetGroupPage, setTargetGroupPage] = useState(1);
+  const [targetGroupSortBy, setTargetGroupSortBy] = useState('latestRequestedAt');
+  const [expandedTargetIds, setExpandedTargetIds] = useState<Set<string>>(new Set());
 
   // 로딩
   const [loading, setLoading] = useState({
@@ -189,6 +215,50 @@ export function AdminFileShareMonitorPage() {
     }
   }, [auth.token, fileId, subPage]);
 
+  // ── Q-3: 파일별 전체 목록 조회 ──
+  const fetchFileGroupList = useCallback(async () => {
+    if (!auth.token) return;
+    setLoading((p) => ({ ...p, sub: true }));
+    try {
+      const query: GroupListQuery = {
+        page: fileGroupPage,
+        pageSize: 20,
+        sortBy: fileGroupSortBy,
+        sortOrder: 'desc',
+      };
+      if (fileGroupStatus) query.status = fileGroupStatus as ShareRequestStatus;
+      if (fileGroupQuery) query.q = fileGroupQuery;
+      const data = await adminFileShareRequestApi.getFileGroupList(auth.token, query);
+      setFileGroupData(data);
+    } catch (e) {
+      console.error('Failed to fetch file group list:', e);
+    } finally {
+      setLoading((p) => ({ ...p, sub: false }));
+    }
+  }, [auth.token, fileGroupPage, fileGroupSortBy, fileGroupStatus, fileGroupQuery]);
+
+  // ── Q-4: 대상자별 전체 목록 조회 ──
+  const fetchTargetGroupList = useCallback(async () => {
+    if (!auth.token) return;
+    setLoading((p) => ({ ...p, sub: true }));
+    try {
+      const query: GroupListQuery = {
+        page: targetGroupPage,
+        pageSize: 20,
+        sortBy: targetGroupSortBy,
+        sortOrder: 'desc',
+      };
+      if (targetGroupStatus) query.status = targetGroupStatus as ShareRequestStatus;
+      if (targetGroupQuery) query.q = targetGroupQuery;
+      const data = await adminFileShareRequestApi.getTargetGroupList(auth.token, query);
+      setTargetGroupData(data);
+    } catch (e) {
+      console.error('Failed to fetch target group list:', e);
+    } finally {
+      setLoading((p) => ({ ...p, sub: false }));
+    }
+  }, [auth.token, targetGroupPage, targetGroupSortBy, targetGroupStatus, targetGroupQuery]);
+
   // ── 상태 탭 변경 ──
   const handleStatusChange = (status: ShareRequestStatus) => {
     setCurrentStatus(status);
@@ -203,6 +273,10 @@ export function AdminFileShareMonitorPage() {
     setSubPage(1);
     setTargetData(null);
     setFileData(null);
+    setFileGroupData(null);
+    setTargetGroupData(null);
+    setExpandedFileIds(new Set());
+    setExpandedTargetIds(new Set());
     setShowDetail(false);
     setDetailData(null);
   };
@@ -219,6 +293,18 @@ export function AdminFileShareMonitorPage() {
       fetchList();
     }
   }, [auth.isAuthenticated, fetchList, subTab]);
+
+  useEffect(() => {
+    if (auth.isAuthenticated && subTab === 'fileGroupList') {
+      fetchFileGroupList();
+    }
+  }, [auth.isAuthenticated, fetchFileGroupList, subTab]);
+
+  useEffect(() => {
+    if (auth.isAuthenticated && subTab === 'targetGroupList') {
+      fetchTargetGroupList();
+    }
+  }, [auth.isAuthenticated, fetchTargetGroupList, subTab]);
 
   // ── 인증 체크 ──
   if (!auth.isAuthenticated) {
@@ -287,10 +373,12 @@ export function AdminFileShareMonitorPage() {
         </div>
       </div>
 
-      {/* ── 서브 탭 (목록 / 대상자별 / 파일별) ── */}
+      {/* ── 서브 탭 (목록 / 대상자별 / 파일별 / 파일별 전체 / 대상자별 전체) ── */}
       <div className="bg-white border-b px-6 py-2 flex items-center gap-1">
         {([
           { key: 'list' as SubQueryTab, label: '📋 상태별 목록' },
+          { key: 'fileGroupList' as SubQueryTab, label: '📁 파일별 목록' },
+          { key: 'targetGroupList' as SubQueryTab, label: '👥 대상자별 목록' },
           { key: 'byTarget' as SubQueryTab, label: '👤 대상자별 조회' },
           { key: 'byFile' as SubQueryTab, label: '📄 파일별 조회' },
         ]).map((tab) => (
@@ -413,6 +501,130 @@ export function AdminFileShareMonitorPage() {
             className="px-4 py-2 text-sm bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50 transition-colors"
           >
             조회
+          </button>
+        </div>
+      )}
+
+      {/* ── 검색/필터 바 (Q-3 파일별 전체 목록) ── */}
+      {subTab === 'fileGroupList' && (
+        <div className="bg-white border-b px-6 py-3 flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <input
+              type="text"
+              value={fileGroupQuery}
+              onChange={(e) => setFileGroupQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setFileGroupPage(1);
+                  fetchFileGroupList();
+                }
+              }}
+              placeholder="파일명 검색"
+              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <select
+            value={fileGroupStatus}
+            onChange={(e) => {
+              setFileGroupStatus(e.target.value as ShareRequestStatus | '');
+              setFileGroupPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">전체 상태</option>
+            <option value="PENDING">대기 중</option>
+            <option value="APPROVED">승인</option>
+            <option value="REJECTED">반려</option>
+            <option value="CANCELED">취소</option>
+          </select>
+          <select
+            value={fileGroupSortBy}
+            onChange={(e) => {
+              setFileGroupSortBy(e.target.value);
+              setFileGroupPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="latestRequestedAt">최근 요청일순</option>
+            <option value="fileName">파일명순</option>
+            <option value="requestCount">요청 건수순</option>
+          </select>
+          <button
+            onClick={() => { setFileGroupPage(1); fetchFileGroupList(); }}
+            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+          >
+            검색
+          </button>
+          <button
+            onClick={() => fetchFileGroupList()}
+            className="px-4 py-2 text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg transition-colors"
+          >
+            새로고침
+          </button>
+        </div>
+      )}
+
+      {/* ── 검색/필터 바 (Q-4 대상자별 전체 목록) ── */}
+      {subTab === 'targetGroupList' && (
+        <div className="bg-white border-b px-6 py-3 flex items-center gap-3">
+          <div className="relative flex-1 max-w-sm">
+            <input
+              type="text"
+              value={targetGroupQuery}
+              onChange={(e) => setTargetGroupQuery(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  setTargetGroupPage(1);
+                  fetchTargetGroupList();
+                }
+              }}
+              placeholder="대상자 이름/이메일 검색"
+              className="w-full pl-9 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <svg className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
+          <select
+            value={targetGroupStatus}
+            onChange={(e) => {
+              setTargetGroupStatus(e.target.value as ShareRequestStatus | '');
+              setTargetGroupPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">전체 상태</option>
+            <option value="PENDING">대기 중</option>
+            <option value="APPROVED">승인</option>
+            <option value="REJECTED">반려</option>
+            <option value="CANCELED">취소</option>
+          </select>
+          <select
+            value={targetGroupSortBy}
+            onChange={(e) => {
+              setTargetGroupSortBy(e.target.value);
+              setTargetGroupPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="latestRequestedAt">최근 요청일순</option>
+            <option value="targetName">대상자명순</option>
+            <option value="requestCount">요청 건수순</option>
+          </select>
+          <button
+            onClick={() => { setTargetGroupPage(1); fetchTargetGroupList(); }}
+            className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+          >
+            검색
+          </button>
+          <button
+            onClick={() => fetchTargetGroupList()}
+            className="px-4 py-2 text-sm bg-blue-50 text-blue-700 hover:bg-blue-100 rounded-lg transition-colors"
+          >
+            새로고침
           </button>
         </div>
       )}
@@ -729,6 +941,139 @@ export function AdminFileShareMonitorPage() {
             )}
           </div>
         )}
+
+        {/* === 파일별 전체 목록 (Q-3) === */}
+        {subTab === 'fileGroupList' && (
+          <div className="flex-1 overflow-auto">
+            {loading.sub ? (
+              <div className="flex items-center justify-center h-full">
+                <Spinner />
+                <span className="ml-2 text-gray-500">파일별 목록 로딩 중...</span>
+              </div>
+            ) : fileGroupData && fileGroupData.items.length > 0 ? (
+              <>
+                <div className="divide-y divide-gray-200">
+                  {fileGroupData.items.map((item) => {
+                    const isExpanded = expandedFileIds.has(item.file.id);
+                    return (
+                      <FileGroupRow
+                        key={item.file.id}
+                        item={item}
+                        isExpanded={isExpanded}
+                        onToggle={() => {
+                          setExpandedFileIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(item.file.id)) next.delete(item.file.id);
+                            else next.add(item.file.id);
+                            return next;
+                          });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* 페이지네이션 */}
+                <div className="flex items-center justify-between px-6 py-3 border-t bg-white sticky bottom-0">
+                  <div className="text-sm text-gray-500">
+                    총 {fileGroupData.totalItems.toLocaleString()}개 파일
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setFileGroupPage((p) => Math.max(1, p - 1))}
+                      disabled={!fileGroupData.hasPrev}
+                      className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-50 hover:bg-gray-50 transition-colors"
+                    >
+                      이전
+                    </button>
+                    <span className="text-sm text-gray-700 px-2">
+                      {fileGroupPage} / {fileGroupData.totalPages}
+                    </span>
+                    <button
+                      onClick={() => setFileGroupPage((p) => p + 1)}
+                      disabled={!fileGroupData.hasNext}
+                      className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-50 hover:bg-gray-50 transition-colors"
+                    >
+                      다음
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                <span className="text-5xl mb-3">📁</span>
+                <p className="text-sm">파일별 공유 요청 데이터가 없습니다.</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* === 대상자별 전체 목록 (Q-4) === */}
+        {subTab === 'targetGroupList' && (
+          <div className="flex-1 overflow-auto">
+            {loading.sub ? (
+              <div className="flex items-center justify-center h-full">
+                <Spinner />
+                <span className="ml-2 text-gray-500">대상자별 목록 로딩 중...</span>
+              </div>
+            ) : targetGroupData && targetGroupData.items.length > 0 ? (
+              <>
+                <div className="divide-y divide-gray-200">
+                  {targetGroupData.items.map((item) => {
+                    const targetId = item.target.userId;
+                    const isExpanded = expandedTargetIds.has(targetId);
+                    return (
+                      <TargetGroupRow
+                        key={targetId}
+                        item={item}
+                        isExpanded={isExpanded}
+                        onToggle={() => {
+                          setExpandedTargetIds((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(targetId)) next.delete(targetId);
+                            else next.add(targetId);
+                            return next;
+                          });
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                {/* 페이지네이션 */}
+                <div className="flex items-center justify-between px-6 py-3 border-t bg-white sticky bottom-0">
+                  <div className="text-sm text-gray-500">
+                    총 {targetGroupData.totalItems.toLocaleString()}명 대상자
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setTargetGroupPage((p) => Math.max(1, p - 1))}
+                      disabled={!targetGroupData.hasPrev}
+                      className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-50 hover:bg-gray-50 transition-colors"
+                    >
+                      이전
+                    </button>
+                    <span className="text-sm text-gray-700 px-2">
+                      {targetGroupPage} / {targetGroupData.totalPages}
+                    </span>
+                    <button
+                      onClick={() => setTargetGroupPage((p) => p + 1)}
+                      disabled={!targetGroupData.hasNext}
+                      className="px-3 py-1.5 text-sm border rounded-lg disabled:opacity-50 hover:bg-gray-50 transition-colors"
+                    >
+                      다음
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                <span className="text-5xl mb-3">👥</span>
+                <p className="text-sm">대상자별 공유 요청 데이터가 없습니다.</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -989,6 +1334,271 @@ function UserCard({ user }: { user: { name: string; email: string; department: s
         {user.position ? ` · ${user.position}` : ''}
       </div>
     </div>
+  );
+}
+
+/** 그룹 요약 배지들 */
+function GroupSummaryBadges({ summary }: { summary: GroupSummary }) {
+  return (
+    <div className="flex items-center gap-1.5 flex-wrap">
+      {summary.pendingCount > 0 && (
+        <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-amber-100 text-amber-700 font-medium">
+          대기 {summary.pendingCount}
+        </span>
+      )}
+      {summary.approvedCount > 0 && (
+        <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-emerald-100 text-emerald-700 font-medium">
+          승인 {summary.approvedCount}
+        </span>
+      )}
+      {summary.rejectedCount > 0 && (
+        <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-red-100 text-red-700 font-medium">
+          반려 {summary.rejectedCount}
+        </span>
+      )}
+      {summary.canceledCount > 0 && (
+        <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600 font-medium">
+          취소 {summary.canceledCount}
+        </span>
+      )}
+      {summary.activeShareCount > 0 && (
+        <span className="inline-flex px-2 py-0.5 text-xs rounded-full bg-blue-100 text-blue-700 font-medium">
+          활성 {summary.activeShareCount}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** 파일별 그룹 행 (Q-3) */
+function FileGroupRow({
+  item,
+  isExpanded,
+  onToggle,
+}: {
+  item: FileGroupItem;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="bg-white">
+      {/* 주 행 */}
+      <div
+        className="px-6 py-4 flex items-center gap-4 hover:bg-blue-50/50 cursor-pointer transition-colors"
+        onClick={onToggle}
+      >
+        {/* 펼침 아이콘 */}
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+
+        {/* 파일 아이콘 + 정보 */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className="w-10 h-10 rounded-lg bg-orange-50 flex items-center justify-center text-orange-600 flex-shrink-0">
+            📄
+          </div>
+          <div className="min-w-0">
+            <div className="font-medium text-gray-900 truncate">{item.file.name}</div>
+            <div className="text-xs text-gray-400 truncate">{item.file.path} · {item.file.mimeType}</div>
+          </div>
+        </div>
+
+        {/* 요약 배지 */}
+        <div className="flex-shrink-0">
+          <GroupSummaryBadges summary={item.summary} />
+        </div>
+
+        {/* 총 요청 수 */}
+        <div className="text-right flex-shrink-0 w-20">
+          <div className="text-sm font-semibold text-gray-900">{item.summary.totalRequestCount}건</div>
+          <div className="text-xs text-gray-400">요청</div>
+        </div>
+
+        {/* 최근 요청일 */}
+        <div className="text-right flex-shrink-0 w-28">
+          <div className="text-xs text-gray-500">{formatDateTime(item.latestRequestedAt)}</div>
+        </div>
+      </div>
+
+      {/* 펼침 영역: 요청 목록 */}
+      {isExpanded && item.requests.length > 0 && (
+        <div className="bg-gray-50 border-t">
+          <table className="min-w-full">
+            <thead>
+              <tr className="text-xs text-gray-500 uppercase">
+                <th className="px-6 py-2 text-left pl-16">상태</th>
+                <th className="px-4 py-2 text-left">요청자</th>
+                <th className="px-4 py-2 text-left">대상자</th>
+                <th className="px-4 py-2 text-left">권한</th>
+                <th className="px-4 py-2 text-left">기간</th>
+                <th className="px-4 py-2 text-left">요청일</th>
+                <th className="px-4 py-2 text-left">사유</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {item.requests.map((req) => (
+                <RequestBriefRow key={req.id} req={req} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 대상자별 그룹 행 (Q-4) */
+function TargetGroupRow({
+  item,
+  isExpanded,
+  onToggle,
+}: {
+  item: TargetGroupItem;
+  isExpanded: boolean;
+  onToggle: () => void;
+}) {
+  const isExternal = item.target.type === 'EXTERNAL_USER';
+  const company = isExternal ? (item.target as ExternalUserDetail).company : undefined;
+
+  return (
+    <div className="bg-white">
+      {/* 주 행 */}
+      <div
+        className="px-6 py-4 flex items-center gap-4 hover:bg-blue-50/50 cursor-pointer transition-colors"
+        onClick={onToggle}
+      >
+        {/* 펼침 아이콘 */}
+        <svg
+          className={`w-4 h-4 text-gray-400 transition-transform flex-shrink-0 ${isExpanded ? 'rotate-90' : ''}`}
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+
+        {/* 사용자 아바타 + 정보 */}
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <div className={`w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0 ${
+            isExternal ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'
+          }`}>
+            {item.target.name.charAt(0)}
+          </div>
+          <div className="min-w-0">
+            <div className="flex items-center gap-2">
+              <span className="font-medium text-gray-900">{item.target.name}</span>
+              <span className={`px-1.5 py-0.5 text-xs rounded ${
+                isExternal ? 'bg-purple-50 text-purple-600' : 'bg-blue-50 text-blue-600'
+              }`}>
+                {isExternal ? '외부' : '내부'}
+              </span>
+            </div>
+            <div className="text-xs text-gray-400 truncate">
+              {item.target.email}
+              {company ? ` · ${company}` : ''}
+              {'department' in item.target && item.target.department ? ` · ${item.target.department}` : ''}
+            </div>
+          </div>
+        </div>
+
+        {/* 요약 배지 */}
+        <div className="flex-shrink-0">
+          <GroupSummaryBadges summary={item.summary} />
+        </div>
+
+        {/* 총 요청 수 */}
+        <div className="text-right flex-shrink-0 w-20">
+          <div className="text-sm font-semibold text-gray-900">{item.summary.totalRequestCount}건</div>
+          <div className="text-xs text-gray-400">요청</div>
+        </div>
+
+        {/* 최근 요청일 */}
+        <div className="text-right flex-shrink-0 w-28">
+          <div className="text-xs text-gray-500">{formatDateTime(item.latestRequestedAt)}</div>
+        </div>
+      </div>
+
+      {/* 펼침 영역: 요청 목록 */}
+      {isExpanded && item.requests.length > 0 && (
+        <div className="bg-gray-50 border-t">
+          <table className="min-w-full">
+            <thead>
+              <tr className="text-xs text-gray-500 uppercase">
+                <th className="px-6 py-2 text-left pl-16">상태</th>
+                <th className="px-4 py-2 text-left">요청자</th>
+                <th className="px-4 py-2 text-left">대상자</th>
+                <th className="px-4 py-2 text-left">권한</th>
+                <th className="px-4 py-2 text-left">기간</th>
+                <th className="px-4 py-2 text-left">요청일</th>
+                <th className="px-4 py-2 text-left">사유</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {item.requests.map((req) => (
+                <RequestBriefRow key={req.id} req={req} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** 요청 간략 행 (Q-3, Q-4 공통 펼침 영역) */
+function RequestBriefRow({ req }: { req: ShareRequestBrief }) {
+  const st = STATUS_MAP[req.status];
+  return (
+    <tr className="hover:bg-gray-100/50 text-sm">
+      <td className="px-6 py-2.5 pl-16">
+        <span className={`inline-flex px-2 py-0.5 text-xs font-medium rounded-full ${st.bg} ${st.color}`}>
+          {st.label}
+        </span>
+      </td>
+      <td className="px-4 py-2.5">
+        <div className="font-medium text-gray-900">{req.requester.name}</div>
+        <div className="text-xs text-gray-400">{req.requester.department}</div>
+      </td>
+      <td className="px-4 py-2.5">
+        <div className="flex flex-wrap gap-1">
+          {req.targets.slice(0, 2).map((t, i) => (
+            <span
+              key={i}
+              className={`inline-flex items-center px-1.5 py-0.5 text-xs rounded ${
+                t.type === 'INTERNAL_USER' ? 'bg-blue-50 text-blue-600' : 'bg-purple-50 text-purple-600'
+              }`}
+            >
+              {t.name}
+            </span>
+          ))}
+          {req.targets.length > 2 && (
+            <span className="text-xs text-gray-400">+{req.targets.length - 2}</span>
+          )}
+        </div>
+      </td>
+      <td className="px-4 py-2.5">
+        <span className={`px-2 py-0.5 text-xs rounded ${
+          req.permission === 'VIEW' ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'
+        }`}>
+          {req.permission === 'VIEW' ? '열람' : '다운로드'}
+          {req.maxDownloads ? ` (${req.currentDownloadCount ?? 0}/${req.maxDownloads})` : ''}
+        </span>
+      </td>
+      <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
+        {formatDate(req.startAt)} ~ {formatDate(req.endAt)}
+      </td>
+      <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
+        {formatDateTime(req.requestedAt)}
+      </td>
+      <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate" title={req.reason}>
+        {req.reason}
+      </td>
+    </tr>
   );
 }
 

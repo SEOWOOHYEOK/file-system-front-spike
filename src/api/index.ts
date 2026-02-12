@@ -96,6 +96,11 @@ export { rolePermissionApi, setRolePermissionLogCallback } from './rolePermissio
 export { auditLogApi, setAuditLogCallback } from './auditLogApi';
 
 // ============================================
+// 702.내가 받은 공유 요청 관리
+// ============================================
+export { myReceivedRequestApi } from './myReceivedRequestApi';
+
+// ============================================
 // Default Export (통합 API 객체)
 // ============================================
 import { authApi } from './authApi';
@@ -110,6 +115,7 @@ import { syncDashboardApi } from './syncDashboardApi';
 import { fileActionRequestApi, fileActionRequestAdminApi } from './fileActionRequestApi';
 import { rolePermissionApi } from './rolePermissionApi';
 import { auditLogApi } from './auditLogApi';
+import { myReceivedRequestApi } from './myReceivedRequestApi';
 
 export const api = {
   // 100.인증
@@ -157,6 +163,9 @@ export const api = {
 
   // 806.감사 로그
   auditLog: auditLogApi,
+
+  // 702.내가 받은 공유 요청
+  myReceivedRequest: myReceivedRequestApi,
 };
 
 export default api;
