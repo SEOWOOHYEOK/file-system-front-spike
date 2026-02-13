@@ -111,6 +111,7 @@ export function AdminFileShareMonitorPage() {
   const [fileGroupStatus, setFileGroupStatus] = useState<ShareRequestStatus | ''>('');
   const [fileGroupPage, setFileGroupPage] = useState(1);
   const [fileGroupSortBy, setFileGroupSortBy] = useState('latestRequestedAt');
+  const [fileGroupSortOrder, setFileGroupSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedFileIds, setExpandedFileIds] = useState<Set<string>>(new Set());
 
   // Q-4: 대상자별 전체 목록 상태
@@ -119,6 +120,7 @@ export function AdminFileShareMonitorPage() {
   const [targetGroupStatus, setTargetGroupStatus] = useState<ShareRequestStatus | ''>('');
   const [targetGroupPage, setTargetGroupPage] = useState(1);
   const [targetGroupSortBy, setTargetGroupSortBy] = useState('latestRequestedAt');
+  const [targetGroupSortOrder, setTargetGroupSortOrder] = useState<'asc' | 'desc'>('desc');
   const [expandedTargetIds, setExpandedTargetIds] = useState<Set<string>>(new Set());
 
   // 로딩
@@ -224,7 +226,7 @@ export function AdminFileShareMonitorPage() {
         page: fileGroupPage,
         pageSize: 20,
         sortBy: fileGroupSortBy,
-        sortOrder: 'desc',
+        sortOrder: fileGroupSortOrder,
       };
       if (fileGroupStatus) query.status = fileGroupStatus as ShareRequestStatus;
       if (fileGroupQuery) query.q = fileGroupQuery;
@@ -235,7 +237,7 @@ export function AdminFileShareMonitorPage() {
     } finally {
       setLoading((p) => ({ ...p, sub: false }));
     }
-  }, [auth.token, fileGroupPage, fileGroupSortBy, fileGroupStatus, fileGroupQuery]);
+  }, [auth.token, fileGroupPage, fileGroupSortBy, fileGroupSortOrder, fileGroupStatus, fileGroupQuery]);
 
   // ── Q-4: 대상자별 전체 목록 조회 ──
   const fetchTargetGroupList = useCallback(async () => {
@@ -246,7 +248,7 @@ export function AdminFileShareMonitorPage() {
         page: targetGroupPage,
         pageSize: 20,
         sortBy: targetGroupSortBy,
-        sortOrder: 'desc',
+        sortOrder: targetGroupSortOrder,
       };
       if (targetGroupStatus) query.status = targetGroupStatus as ShareRequestStatus;
       if (targetGroupQuery) query.q = targetGroupQuery;
@@ -257,7 +259,7 @@ export function AdminFileShareMonitorPage() {
     } finally {
       setLoading((p) => ({ ...p, sub: false }));
     }
-  }, [auth.token, targetGroupPage, targetGroupSortBy, targetGroupStatus, targetGroupQuery]);
+  }, [auth.token, targetGroupPage, targetGroupSortBy, targetGroupSortOrder, targetGroupStatus, targetGroupQuery]);
 
   // ── 상태 탭 변경 ──
   const handleStatusChange = (status: ShareRequestStatus) => {
@@ -552,6 +554,17 @@ export function AdminFileShareMonitorPage() {
             <option value="fileName">파일명순</option>
             <option value="requestCount">요청 건수순</option>
           </select>
+          <select
+            value={fileGroupSortOrder}
+            onChange={(e) => {
+              setFileGroupSortOrder(e.target.value as 'asc' | 'desc');
+              setFileGroupPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="desc">내림차순</option>
+            <option value="asc">오름차순</option>
+          </select>
           <button
             onClick={() => { setFileGroupPage(1); fetchFileGroupList(); }}
             className="px-4 py-2 text-sm bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
@@ -613,6 +626,17 @@ export function AdminFileShareMonitorPage() {
             <option value="latestRequestedAt">최근 요청일순</option>
             <option value="targetName">대상자명순</option>
             <option value="requestCount">요청 건수순</option>
+          </select>
+          <select
+            value={targetGroupSortOrder}
+            onChange={(e) => {
+              setTargetGroupSortOrder(e.target.value as 'asc' | 'desc');
+              setTargetGroupPage(1);
+            }}
+            className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="desc">내림차순</option>
+            <option value="asc">오름차순</option>
           </select>
           <button
             onClick={() => { setTargetGroupPage(1); fetchTargetGroupList(); }}
@@ -1437,6 +1461,7 @@ function FileGroupRow({
                 <th className="px-4 py-2 text-left">권한</th>
                 <th className="px-4 py-2 text-left">기간</th>
                 <th className="px-4 py-2 text-left">요청일</th>
+                <th className="px-4 py-2 text-left">승인자</th>
                 <th className="px-4 py-2 text-left">사유</th>
               </tr>
             </thead>
@@ -1535,6 +1560,7 @@ function TargetGroupRow({
                 <th className="px-4 py-2 text-left">권한</th>
                 <th className="px-4 py-2 text-left">기간</th>
                 <th className="px-4 py-2 text-left">요청일</th>
+                <th className="px-4 py-2 text-left">승인자</th>
                 <th className="px-4 py-2 text-left">사유</th>
               </tr>
             </thead>
@@ -1582,18 +1608,37 @@ function RequestBriefRow({ req }: { req: ShareRequestBrief }) {
         </div>
       </td>
       <td className="px-4 py-2.5">
-        <span className={`px-2 py-0.5 text-xs rounded ${
-          req.permission === 'VIEW' ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'
-        }`}>
-          {req.permission === 'VIEW' ? '열람' : '다운로드'}
-          {req.maxDownloads ? ` (${req.currentDownloadCount ?? 0}/${req.maxDownloads})` : ''}
-        </span>
+        <div>
+          <span className={`px-2 py-0.5 text-xs rounded ${
+            req.permission === 'VIEW' ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'
+          }`}>
+            {req.permission === 'VIEW' ? '열람' : '다운로드'}
+            {req.maxDownloads ? ` (${req.maxDownloads}회)` : ''}
+          </span>
+          {(req.currentViewCount != null || req.currentDownloadCount != null) && (
+            <div className="text-xs text-gray-400 mt-0.5">
+              뷰 {req.currentViewCount ?? 0} · 다운 {req.currentDownloadCount ?? 0}
+            </div>
+          )}
+        </div>
       </td>
       <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
         {formatDate(req.startAt)} ~ {formatDate(req.endAt)}
       </td>
       <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
         {formatDateTime(req.requestedAt)}
+      </td>
+      <td className="px-4 py-2.5 text-xs">
+        {req.approver ? (
+          <div>
+            <div className="text-gray-700">{req.approver.name}</div>
+            {req.decidedAt && (
+              <div className="text-gray-400">{formatDateTime(req.decidedAt)}</div>
+            )}
+          </div>
+        ) : (
+          <span className="text-gray-300">-</span>
+        )}
       </td>
       <td className="px-4 py-2.5 text-gray-500 text-xs max-w-[200px] truncate" title={req.reason}>
         {req.reason}

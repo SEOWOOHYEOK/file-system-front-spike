@@ -357,7 +357,7 @@ export function FileSidebar({
                 isSentShareActive ? 'text-blue-600' : 'text-gray-400'
               }`}
             />
-            <span className="flex-1 text-left">내 공유 관리</span>
+            <span className="flex-1 text-left">내 공유 관리(701-B)</span>
             {sentShareCount > 0 && (
               <CountBadge count={sentShareCount} />
             )}
@@ -404,7 +404,7 @@ export function FileSidebar({
                 isSentRequestActive ? 'text-blue-600' : 'text-gray-400'
               }`}
             />
-            <span className="flex-1 text-left">파일 공유 결제</span>
+            <span className="flex-1 text-left">파일 공유 결제(701-A)</span>
             {sentRequestCounts.pending > 0 && (
               <CountBadge count={sentRequestCounts.pending} variant="warning" />
             )}

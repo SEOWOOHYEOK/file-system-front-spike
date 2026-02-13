@@ -112,6 +112,7 @@ export interface FileShareRequestItem {
   isAutoApproved: boolean;
   publicShareIds: string[];
   requestedAt: string;
+  updatedAt?: string;
 }
 
 /** 공유 요청 상세 (A-3) */
