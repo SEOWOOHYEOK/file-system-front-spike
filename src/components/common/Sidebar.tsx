@@ -32,7 +32,7 @@ const navItems = [
   },
 
   {
-    title: '파일 작업(이동, 삭제)요청 관리',
+    title: '파일 작업(이동, 삭제)요청 관리(850,860)',
     path: '/admin/file-action-requests',
     icon: '📋',
   },

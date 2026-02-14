@@ -7,8 +7,20 @@
 // Enum 타입
 // ============================================
 
-/** 요청 타입 */
+/** 대상 타입 (파일/폴더) */
+export type TargetType = 'FILE' | 'FOLDER';
+
+/** 요청 타입 (파일) */
 export type FileActionType = 'MOVE' | 'DELETE';
+
+/** 요청 타입 (폴더) */
+export type FolderActionType = 'FOLDER_MOVE';
+
+/** 요청 타입 (파일 + 폴더 통합) */
+export type ActionType = FileActionType | FolderActionType;
+
+/** 내 요청 목록 역할 필터 */
+export type MyRequestRole = 'REQUESTED' | 'PROCESSED';
 
 /** 요청 상태 */
 export type FileActionRequestStatus =
@@ -27,12 +39,15 @@ export type FileActionRequestStatus =
 /** 파일 작업 요청 응답 */
 export interface FileActionRequestResponse {
   id: string;
+  targetType: 'FILE';
   type: FileActionType;
   status: FileActionRequestStatus;
   fileId: string;
   fileName: string;
   sourceFolderId?: string;
+  sourceFolderPath?: string;
   targetFolderId?: string;
+  targetFolderPath?: string;
   requesterId: string;
   designatedApproverId: string;
   approverId?: string;
@@ -43,6 +58,32 @@ export interface FileActionRequestResponse {
   decidedAt?: string;
   executedAt?: string;
 }
+
+/** 폴더 작업 요청 응답 */
+export interface FolderActionRequestResponse {
+  id: string;
+  targetType: 'FOLDER';
+  type: 'FOLDER_MOVE';
+  status: FileActionRequestStatus;
+  folderId: string;
+  folderName: string;
+  sourceParentFolderId?: string;
+  sourceParentFolderPath?: string;
+  targetParentFolderId?: string;
+  targetParentFolderPath?: string;
+  requesterId: string;
+  designatedApproverId: string;
+  approverId?: string;
+  reason: string;
+  decisionComment?: string;
+  executionNote?: string;
+  requestedAt: string;
+  decidedAt?: string;
+  executedAt?: string;
+}
+
+/** 파일/폴더 작업 요청 통합 타입 */
+export type ActionRequestItem = FileActionRequestResponse | FolderActionRequestResponse;
 
 /** 페이지네이션 응답 래퍼 */
 export interface PaginatedFileActionResponse<T> {
@@ -70,6 +111,14 @@ export interface CreateMoveRequest {
 /** 삭제 요청 생성 */
 export interface CreateDeleteRequest {
   fileId: string;
+  reason: string;
+  designatedApproverId: string;
+}
+
+/** 폴더 이동 요청 생성 */
+export interface CreateFolderMoveRequest {
+  folderId: string;
+  targetParentFolderId: string;
   reason: string;
   designatedApproverId: string;
 }
@@ -108,6 +157,8 @@ export interface MyRequestsQuery {
   sortOrder?: 'asc' | 'desc';
   status?: FileActionRequestStatus;
   type?: FileActionType;
+  targetType?: TargetType;
+  role?: MyRequestRole;
 }
 
 /** 관리자 요청 목록 쿼리 */
@@ -116,6 +167,15 @@ export interface AdminRequestsQuery extends MyRequestsQuery {
   fileId?: string;
   requestedFrom?: string;
   requestedTo?: string;
+}
+
+/** 폴더 관리자 요청 목록 쿼리 */
+export interface FolderAdminRequestsQuery extends Omit<MyRequestsQuery, 'type'> {
+  requesterId?: string;
+  folderId?: string;
+  requestedFrom?: string;
+  requestedTo?: string;
+  type?: FolderActionType;
 }
 
 /** 상태별 요약 응답 */
@@ -200,7 +260,8 @@ export const STATUS_DISPLAY: Record<FileActionRequestStatus, StatusDisplayInfo> 
 };
 
 /** 타입별 표시 정보 */
-export const TYPE_DISPLAY: Record<FileActionType, { label: string; icon: string }> = {
+export const TYPE_DISPLAY: Record<ActionType, { label: string; icon: string }> = {
   MOVE: { label: '이동 요청', icon: '📂' },
   DELETE: { label: '삭제 요청', icon: '🗑️' },
+  FOLDER_MOVE: { label: '폴더 이동 요청', icon: '📁' },
 };

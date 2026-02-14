@@ -1,20 +1,30 @@
 /**
- * FileActionRequestModal - 파일 이동/삭제 요청 모달
+ * FileActionRequestModal - 파일/폴더 이동·삭제 요청 모달
  * 승인자 선택 + 사유 입력 → 요청 생성
  */
 import { useState, useEffect, useCallback } from 'react';
 import { fileActionRequestApi } from '../../api/fileActionRequestApi';
+import { folderActionRequestApi } from '../../api/folderActionRequestApi';
 import { folderApi } from '../../api/folderApi';
-import type { FileActionType, ApproverUser } from '../../types/file-action-request.types';
+import type {
+  FileActionType,
+  ApproverUser,
+  TargetType,
+} from '../../types/file-action-request.types';
 
 interface FileActionRequestModalProps {
   isOpen: boolean;
   onClose: () => void;
   token: string;
+  // File props (existing)
   fileId: string;
   fileName: string;
   requestType: FileActionType;
   onSuccess: () => void;
+  // Folder props (optional)
+  targetType?: TargetType;
+  folderId?: string;
+  folderName?: string;
 }
 
 interface FolderTreeNode {
@@ -33,7 +43,11 @@ export function FileActionRequestModal({
   fileName,
   requestType,
   onSuccess,
+  targetType = 'FILE',
+  folderId,
+  folderName,
 }: FileActionRequestModalProps) {
+  const isFolder = targetType === 'FOLDER';
   const [reason, setReason] = useState('');
   const [approvers, setApprovers] = useState<ApproverUser[]>([]);
   const [selectedApproverId, setSelectedApproverId] = useState('');
@@ -52,8 +66,11 @@ export function FileActionRequestModal({
     setLoadingApprovers(true);
     setError(null);
 
-    fileActionRequestApi
-      .getApprovers(token, requestType)
+    const loadApprovers = isFolder
+      ? folderActionRequestApi.getApprovers(token)
+      : fileActionRequestApi.getApprovers(token, requestType);
+
+    loadApprovers
       .then((data) => {
         setApprovers(data);
         if (data.length > 0) {
@@ -65,7 +82,7 @@ export function FileActionRequestModal({
         setError('승인자 목록을 불러올 수 없습니다.');
       })
       .finally(() => setLoadingApprovers(false));
-  }, [isOpen, token, requestType]);
+  }, [isOpen, token, requestType, isFolder]);
 
   // 이동 요청일 때 폴더 트리 초기화
   const initFolderTree = useCallback(async () => {
@@ -97,10 +114,11 @@ export function FileActionRequestModal({
   }, [token]);
 
   useEffect(() => {
-    if (isOpen && requestType === 'MOVE' && !folderTree) {
+    const shouldShowFolderTree = isFolder || requestType === 'MOVE';
+    if (isOpen && shouldShowFolderTree && !folderTree) {
       initFolderTree();
     }
-  }, [isOpen, requestType, folderTree, initFolderTree]);
+  }, [isOpen, requestType, isFolder, folderTree, initFolderTree]);
 
   // 모달 닫기 시 초기화
   useEffect(() => {
@@ -282,13 +300,22 @@ export function FileActionRequestModal({
   // 요청 제출
   const handleSubmit = async () => {
     if (!token || !reason.trim() || !selectedApproverId) return;
-    if (requestType === 'MOVE' && !targetFolderId) return;
+    const needsTargetFolder = isFolder || requestType === 'MOVE';
+    if (needsTargetFolder && !targetFolderId) return;
+    if (isFolder && !folderId) return;
 
     setLoading(true);
     setError(null);
 
     try {
-      if (requestType === 'MOVE') {
+      if (isFolder) {
+        await folderActionRequestApi.createMoveRequest(token, {
+          folderId: folderId!,
+          targetParentFolderId: targetFolderId,
+          reason: reason.trim(),
+          designatedApproverId: selectedApproverId,
+        });
+      } else if (requestType === 'MOVE') {
         await fileActionRequestApi.createMoveRequest(token, {
           fileId,
           targetFolderId,
@@ -303,11 +330,12 @@ export function FileActionRequestModal({
         });
       }
 
-      alert(
-        requestType === 'MOVE'
+      const successMessage = isFolder
+        ? '폴더 이동 요청이 생성되었습니다.'
+        : requestType === 'MOVE'
           ? '이동 요청이 생성되었습니다.'
-          : '삭제 요청이 생성되었습니다.',
-      );
+          : '삭제 요청이 생성되었습니다.';
+      alert(successMessage);
       onSuccess();
       onClose();
     } catch (err: unknown) {
@@ -315,8 +343,11 @@ export function FileActionRequestModal({
       let errorMessage = '요청 생성에 실패했습니다.';
       if (err && typeof err === 'object' && 'response' in err) {
         const axiosErr = err as { response?: { data?: { message?: string; code?: number } } };
-        if (axiosErr.response?.data?.code === 10002) {
+        const code = axiosErr.response?.data?.code;
+        if (code === 10002) {
           errorMessage = '이 파일에 대해 이미 진행 중인 요청이 있습니다.';
+        } else if (code === 10102) {
+          errorMessage = '이 폴더에 대해 이미 진행 중인 요청이 있습니다.';
         } else if (axiosErr.response?.data?.message) {
           errorMessage = axiosErr.response.data.message;
         }
@@ -335,10 +366,17 @@ export function FileActionRequestModal({
         {/* 헤더 */}
         <div className="px-6 py-4 border-b">
           <h3 className="text-lg font-semibold text-gray-900">
-            {requestType === 'MOVE' ? '📂 파일 이동 요청' : '🗑️ 파일 삭제 요청'}
+            {isFolder
+              ? '📁 폴더 이동 요청'
+              : requestType === 'MOVE'
+                ? '📂 파일 이동 요청'
+                : '🗑️ 파일 삭제 요청'}
           </h3>
           <p className="text-sm text-gray-500 mt-1">
-            파일: <span className="font-medium text-gray-700">{fileName}</span>
+            {isFolder ? '폴더' : '파일'}:{' '}
+            <span className="font-medium text-gray-700">
+              {isFolder ? (folderName ?? '') : fileName}
+            </span>
           </p>
         </div>
 
@@ -350,8 +388,8 @@ export function FileActionRequestModal({
             </div>
           )}
 
-          {/* 이동 대상 폴더 선택 (MOVE만) */}
-          {requestType === 'MOVE' && (
+          {/* 이동 대상 폴더 선택 (MOVE 또는 FOLDER) */}
+          {(isFolder || requestType === 'MOVE') && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">
                 이동 대상 폴더
@@ -427,10 +465,10 @@ export function FileActionRequestModal({
               loading ||
               !reason.trim() ||
               !selectedApproverId ||
-              (requestType === 'MOVE' && !targetFolderId)
+              ((isFolder || requestType === 'MOVE') && !targetFolderId)
             }
             className={`px-4 py-2 text-white rounded-lg disabled:opacity-50 ${
-              requestType === 'MOVE'
+              isFolder || requestType === 'MOVE'
                 ? 'bg-blue-500 hover:bg-blue-600'
                 : 'bg-red-500 hover:bg-red-600'
             }`}

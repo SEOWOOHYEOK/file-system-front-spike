@@ -1,14 +1,16 @@
 /**
- * AdminFileActionRequestPage - 파일 작업 요청 관리 (승인/반려)
- * 관리자가 파일 이동/삭제 요청을 확인하고 승인/반려하는 페이지
+ * AdminFileActionRequestPage - 작업 요청 관리 (승인/반려)
+ * 관리자가 파일/폴더 이동·삭제 요청을 확인하고 승인/반려하는 페이지
  */
 import { useState, useEffect, useCallback } from 'react';
 import { useInternalAuth } from '../hooks/useInternalAuth';
 import { fileActionRequestAdminApi } from '../api/fileActionRequestApi';
+import { folderActionRequestAdminApi } from '../api/folderActionRequestApi';
 import type {
-  FileActionRequestResponse,
+  ActionRequestItem,
   FileActionRequestStatus,
   FileActionType,
+  FolderAdminRequestsQuery,
   StatusSummary,
   AdminRequestsQuery,
 } from '../types/file-action-request.types';
@@ -16,6 +18,7 @@ import { STATUS_DISPLAY, TYPE_DISPLAY } from '../types/file-action-request.types
 
 // 탭 타입
 type ViewTab = 'my-pending' | 'all';
+type TargetTab = 'file' | 'folder';
 
 export function AdminFileActionRequestPage() {
   const { auth } = useInternalAuth();
@@ -23,12 +26,13 @@ export function AdminFileActionRequestPage() {
   // ============================================
   // 탭 상태
   // ============================================
+  const [targetTab, setTargetTab] = useState<TargetTab>('file');
   const [activeTab, setActiveTab] = useState<ViewTab>('my-pending');
 
   // ============================================
   // 목록 상태
   // ============================================
-  const [requests, setRequests] = useState<FileActionRequestResponse[]>([]);
+  const [requests, setRequests] = useState<ActionRequestItem[]>([]);
   const [totalItems, setTotalItems] = useState(0);
   const [totalPages, setTotalPages] = useState(0);
   const [page, setPage] = useState(1);
@@ -54,7 +58,7 @@ export function AdminFileActionRequestPage() {
   // ============================================
   // 상세 모달 상태
   // ============================================
-  const [detailRequest, setDetailRequest] = useState<FileActionRequestResponse | null>(null);
+  const [detailRequest, setDetailRequest] = useState<ActionRequestItem | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
 
   // ============================================
@@ -80,25 +84,38 @@ export function AdminFileActionRequestPage() {
   const fetchSummary = useCallback(async () => {
     if (!auth.token) return;
     try {
-      const data = await fileActionRequestAdminApi.getSummary(auth.token);
+      const data =
+        targetTab === 'folder'
+          ? await folderActionRequestAdminApi.getSummary(auth.token)
+          : await fileActionRequestAdminApi.getSummary(auth.token);
       setSummary(data);
     } catch (error) {
       console.error('Failed to fetch summary:', error);
     }
-  }, [auth.token]);
+  }, [auth.token, targetTab]);
 
   const fetchRequests = useCallback(async () => {
     if (!auth.token) return;
     setLoading(true);
     try {
       let data;
-      if (activeTab === 'my-pending') {
-        data = await fileActionRequestAdminApi.getMyPendingApprovals(auth.token, page, pageSize);
+      if (targetTab === 'folder') {
+        if (activeTab === 'my-pending') {
+          data = await folderActionRequestAdminApi.getMyPendingApprovals(auth.token, page, pageSize);
+        } else {
+          const query: FolderAdminRequestsQuery = { page, pageSize };
+          if (filterStatus) query.status = filterStatus;
+          data = await folderActionRequestAdminApi.getAllRequests(auth.token, query);
+        }
       } else {
-        const query: AdminRequestsQuery = { page, pageSize };
-        if (filterStatus) query.status = filterStatus;
-        if (filterType) query.type = filterType;
-        data = await fileActionRequestAdminApi.getAllRequests(auth.token, query);
+        if (activeTab === 'my-pending') {
+          data = await fileActionRequestAdminApi.getMyPendingApprovals(auth.token, page, pageSize);
+        } else {
+          const query: AdminRequestsQuery = { page, pageSize };
+          if (filterStatus) query.status = filterStatus;
+          if (filterType) query.type = filterType;
+          data = await fileActionRequestAdminApi.getAllRequests(auth.token, query);
+        }
       }
       setRequests(data.items);
       setTotalItems(data.totalItems);
@@ -108,7 +125,7 @@ export function AdminFileActionRequestPage() {
     } finally {
       setLoading(false);
     }
-  }, [auth.token, activeTab, page, pageSize, filterStatus, filterType]);
+  }, [auth.token, targetTab, activeTab, page, pageSize, filterStatus, filterType]);
 
   // 초기 로드
   useEffect(() => {
@@ -136,7 +153,10 @@ export function AdminFileActionRequestPage() {
   const handleViewDetail = useCallback(async (id: string) => {
     if (!auth.token) return;
     try {
-      const detail = await fileActionRequestAdminApi.getRequestDetail(auth.token, id);
+      const detail =
+        targetTab === 'folder'
+          ? await folderActionRequestAdminApi.getRequestDetail(auth.token, id)
+          : await fileActionRequestAdminApi.getRequestDetail(auth.token, id);
       if (detail) {
         setDetailRequest(detail);
         setShowDetailModal(true);
@@ -144,7 +164,7 @@ export function AdminFileActionRequestPage() {
     } catch (error) {
       console.error('Failed to fetch detail:', error);
     }
-  }, [auth.token]);
+  }, [auth.token, targetTab]);
 
   // ============================================
   // 단건 승인
@@ -153,14 +173,25 @@ export function AdminFileActionRequestPage() {
     if (!auth.token || !actionTargetId) return;
     setActionLoading(true);
     try {
-      const result = await fileActionRequestAdminApi.approveRequest(auth.token, actionTargetId, {
-        comment: approveComment || undefined,
-      });
+      const result =
+        targetTab === 'folder'
+          ? await folderActionRequestAdminApi.approveRequest(auth.token, actionTargetId, {
+              comment: approveComment || undefined,
+            })
+          : await fileActionRequestAdminApi.approveRequest(auth.token, actionTargetId, {
+              comment: approveComment || undefined,
+            });
 
       if (result.status === 'EXECUTED') {
-        alert('승인 완료 - 파일 작업이 성공적으로 실행되었습니다.');
+        alert(
+          targetTab === 'folder'
+            ? '승인 완료 - 폴더 작업이 성공적으로 실행되었습니다.'
+            : '승인 완료 - 파일 작업이 성공적으로 실행되었습니다.',
+        );
       } else if (result.status === 'INVALIDATED') {
-        alert(`무효화됨 - ${result.executionNote || '파일 상태가 변경되어 실행할 수 없습니다.'}`);
+        alert(
+          `무효화됨 - ${result.executionNote || (targetTab === 'folder' ? '폴더' : '파일')} 상태가 변경되어 실행할 수 없습니다.`,
+        );
       } else if (result.status === 'FAILED') {
         alert(`실행 실패 - ${result.executionNote || '기술적 오류가 발생했습니다.'}`);
       }
@@ -176,7 +207,7 @@ export function AdminFileActionRequestPage() {
     } finally {
       setActionLoading(false);
     }
-  }, [auth.token, actionTargetId, approveComment, fetchRequests, fetchSummary]);
+  }, [auth.token, targetTab, actionTargetId, approveComment, fetchRequests, fetchSummary]);
 
   // ============================================
   // 단건 반려
@@ -185,9 +216,15 @@ export function AdminFileActionRequestPage() {
     if (!auth.token || !actionTargetId || !rejectComment.trim()) return;
     setActionLoading(true);
     try {
-      await fileActionRequestAdminApi.rejectRequest(auth.token, actionTargetId, {
-        comment: rejectComment.trim(),
-      });
+      if (targetTab === 'folder') {
+        await folderActionRequestAdminApi.rejectRequest(auth.token, actionTargetId, {
+          comment: rejectComment.trim(),
+        });
+      } else {
+        await fileActionRequestAdminApi.rejectRequest(auth.token, actionTargetId, {
+          comment: rejectComment.trim(),
+        });
+      }
       alert('반려 처리가 완료되었습니다.');
       setShowRejectModal(false);
       setRejectComment('');
@@ -200,7 +237,7 @@ export function AdminFileActionRequestPage() {
     } finally {
       setActionLoading(false);
     }
-  }, [auth.token, actionTargetId, rejectComment, fetchRequests, fetchSummary]);
+  }, [auth.token, targetTab, actionTargetId, rejectComment, fetchRequests, fetchSummary]);
 
   // ============================================
   // 일괄 승인
@@ -209,10 +246,16 @@ export function AdminFileActionRequestPage() {
     if (!auth.token || selectedIds.length === 0) return;
     setActionLoading(true);
     try {
-      const results = await fileActionRequestAdminApi.bulkApprove(auth.token, {
-        ids: selectedIds,
-        comment: bulkComment || undefined,
-      });
+      const results =
+        targetTab === 'folder'
+          ? await folderActionRequestAdminApi.bulkApprove(auth.token, {
+              ids: selectedIds,
+              comment: bulkComment || undefined,
+            })
+          : await fileActionRequestAdminApi.bulkApprove(auth.token, {
+              ids: selectedIds,
+              comment: bulkComment || undefined,
+            });
 
       const executed = results.filter(r => r.status === 'EXECUTED').length;
       const invalidated = results.filter(r => r.status === 'INVALIDATED').length;
@@ -231,7 +274,7 @@ export function AdminFileActionRequestPage() {
     } finally {
       setActionLoading(false);
     }
-  }, [auth.token, selectedIds, bulkComment, fetchRequests, fetchSummary]);
+  }, [auth.token, targetTab, selectedIds, bulkComment, fetchRequests, fetchSummary]);
 
   // ============================================
   // 일괄 반려
@@ -240,10 +283,17 @@ export function AdminFileActionRequestPage() {
     if (!auth.token || selectedIds.length === 0 || !bulkComment.trim()) return;
     setActionLoading(true);
     try {
-      await fileActionRequestAdminApi.bulkReject(auth.token, {
-        ids: selectedIds,
-        comment: bulkComment.trim(),
-      });
+      if (targetTab === 'folder') {
+        await folderActionRequestAdminApi.bulkReject(auth.token, {
+          ids: selectedIds,
+          comment: bulkComment.trim(),
+        });
+      } else {
+        await fileActionRequestAdminApi.bulkReject(auth.token, {
+          ids: selectedIds,
+          comment: bulkComment.trim(),
+        });
+      }
 
       alert(`${selectedIds.length}건이 일괄 반려되었습니다.`);
 
@@ -258,7 +308,7 @@ export function AdminFileActionRequestPage() {
     } finally {
       setActionLoading(false);
     }
-  }, [auth.token, selectedIds, bulkComment, fetchRequests, fetchSummary]);
+  }, [auth.token, targetTab, selectedIds, bulkComment, fetchRequests, fetchSummary]);
 
   // ============================================
   // 선택 핸들러
@@ -309,9 +359,9 @@ export function AdminFileActionRequestPage() {
     <div className="p-6 max-w-7xl mx-auto space-y-6">
       {/* 페이지 헤더 */}
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">파일 작업 요청 관리</h1>
+        <h1 className="text-2xl font-bold text-gray-900">작업 요청 관리 (관리자)</h1>
         <p className="text-sm text-gray-500 mt-1">
-          파일 이동/삭제 요청을 확인하고 승인/반려합니다.
+          파일/폴더 이동·삭제 요청을 확인하고 승인/반려합니다.
         </p>
       </div>
 
@@ -340,6 +390,42 @@ export function AdminFileActionRequestPage() {
           })}
         </div>
       )}
+
+      {/* 대상 유형 탭 (파일 / 폴더) */}
+      <div className="flex space-x-1 bg-gray-100 rounded-lg p-1 w-fit">
+        <button
+          onClick={() => {
+            setTargetTab('file');
+            setPage(1);
+            setSelectedIds([]);
+            setFilterStatus('');
+            setFilterType('');
+          }}
+          className={`px-4 py-2 text-sm rounded-md transition-colors ${
+            targetTab === 'file'
+              ? 'bg-white text-gray-900 shadow-sm font-medium'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          파일 요청
+        </button>
+        <button
+          onClick={() => {
+            setTargetTab('folder');
+            setPage(1);
+            setSelectedIds([]);
+            setFilterStatus('');
+            setFilterType('');
+          }}
+          className={`px-4 py-2 text-sm rounded-md transition-colors ${
+            targetTab === 'folder'
+              ? 'bg-white text-gray-900 shadow-sm font-medium'
+              : 'text-gray-600 hover:text-gray-900'
+          }`}
+        >
+          폴더 요청
+        </button>
+      </div>
 
       {/* 탭 + 필터 */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -372,7 +458,7 @@ export function AdminFileActionRequestPage() {
           </button>
         </div>
 
-        {/* 필터 (전체 요청 탭에서만) */}
+        {/* 필터 (전체 요청 탭에서만, 파일 탭에서만 유형 필터 표시) */}
         {activeTab === 'all' && (
           <div className="flex items-center space-x-3">
             <select
@@ -388,15 +474,17 @@ export function AdminFileActionRequestPage() {
               <option value="INVALIDATED">무효화</option>
               <option value="FAILED">실행 실패</option>
             </select>
-            <select
-              value={filterType}
-              onChange={(e) => setFilterType(e.target.value as FileActionType | '')}
-              className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="">모든 유형</option>
-              <option value="MOVE">이동 요청</option>
-              <option value="DELETE">삭제 요청</option>
-            </select>
+            {targetTab === 'file' && (
+              <select
+                value={filterType}
+                onChange={(e) => setFilterType(e.target.value as FileActionType | '')}
+                className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">모든 유형</option>
+                <option value="MOVE">이동 요청</option>
+                <option value="DELETE">삭제 요청</option>
+              </select>
+            )}
             <button
               onClick={() => { fetchRequests(); fetchSummary(); }}
               className="px-3 py-2 text-sm text-blue-600 hover:bg-blue-50 rounded-lg"
@@ -468,7 +556,9 @@ export function AdminFileActionRequestPage() {
                     </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">유형</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">상태</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">파일명</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                      {targetTab === 'folder' ? '폴더명' : '파일명'}
+                    </th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">사유</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">요청일</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">처리</th>
@@ -478,6 +568,7 @@ export function AdminFileActionRequestPage() {
                   {requests.map((req) => {
                     const statusInfo = STATUS_DISPLAY[req.status];
                     const typeInfo = TYPE_DISPLAY[req.type];
+                    const itemName = 'fileName' in req ? req.fileName : req.folderName;
 
                     return (
                       <tr
@@ -507,8 +598,8 @@ export function AdminFileActionRequestPage() {
                             {statusInfo.label}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[200px] truncate" title={req.fileName}>
-                          {req.fileName}
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900 max-w-[200px] truncate" title={itemName}>
+                          {itemName}
                         </td>
                         <td className="px-4 py-3 text-sm text-gray-600 max-w-[200px] truncate" title={req.reason}>
                           {req.reason}
@@ -617,8 +708,12 @@ export function AdminFileActionRequestPage() {
               </div>
 
               <div>
-                <div className="text-xs text-gray-500 mb-1">파일명</div>
-                <div className="text-sm font-medium">{detailRequest.fileName}</div>
+                <div className="text-xs text-gray-500 mb-1">
+                  {'fileName' in detailRequest ? '파일명' : '폴더명'}
+                </div>
+                <div className="text-sm font-medium">
+                  {'fileName' in detailRequest ? detailRequest.fileName : detailRequest.folderName}
+                </div>
               </div>
 
               <div>
@@ -668,14 +763,38 @@ export function AdminFileActionRequestPage() {
                 </div>
               )}
 
-              {detailRequest.type === 'MOVE' && detailRequest.targetFolderId && (
-                <div>
-                  <div className="text-xs text-gray-500 mb-1">이동 대상 폴더 ID</div>
-                  <div className="text-sm text-gray-700 truncate" title={detailRequest.targetFolderId}>
-                    {detailRequest.targetFolderId}
+              {'targetFolderId' in detailRequest &&
+                detailRequest.type === 'MOVE' &&
+                detailRequest.targetFolderId && (
+                  <div>
+                    <div className="text-xs text-gray-500 mb-1">이동 대상 폴더 ID</div>
+                    <div className="text-sm text-gray-700 truncate" title={detailRequest.targetFolderId}>
+                      {detailRequest.targetFolderId}
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+
+              {'sourceParentFolderPath' in detailRequest &&
+                (detailRequest.sourceParentFolderPath || detailRequest.targetParentFolderPath) && (
+                  <>
+                    {detailRequest.sourceParentFolderPath && (
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">현재 위치 (부모 경로)</div>
+                        <div className="text-sm text-gray-700 truncate" title={detailRequest.sourceParentFolderPath}>
+                          {detailRequest.sourceParentFolderPath}
+                        </div>
+                      </div>
+                    )}
+                    {detailRequest.targetParentFolderPath && (
+                      <div>
+                        <div className="text-xs text-gray-500 mb-1">이동 대상 (부모 경로)</div>
+                        <div className="text-sm text-gray-700 truncate" title={detailRequest.targetParentFolderPath}>
+                          {detailRequest.targetParentFolderPath}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
             </div>
 
             <div className="px-6 py-4 bg-gray-50 rounded-b-lg flex justify-end space-x-2">

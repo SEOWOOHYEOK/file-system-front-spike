@@ -1,69 +1,59 @@
 /**
- * File Action Request API Client
- * 파일 작업 요청 (이동/삭제 요청 → 승인 → 실행) API
+ * Folder Action Request API Client
+ * 폴더 작업 요청 (이동 요청 → 승인 → 실행) API
  */
 import axios from 'axios';
 import type {
-  FileActionRequestResponse,
+  FolderActionRequestResponse,
   PaginatedFileActionResponse,
-  CreateMoveRequest,
-  CreateDeleteRequest,
+  CreateFolderMoveRequest,
   ApproveRequest,
   RejectRequest,
   BulkApproveRequest,
   BulkRejectRequest,
-  MyRequestsQuery,
-  AdminRequestsQuery,
+  FolderAdminRequestsQuery,
   StatusSummary,
   ApproverUser,
-  FileActionType,
+  MyRequestsQuery,
+  FolderActionType,
 } from '../types/file-action-request.types';
 
 const api = axios.create({
   baseURL: '/v1',
 });
 
+/** 폴더 내 요청 목록 쿼리 (type은 FOLDER_MOVE만) */
+type FolderMyRequestsQuery = Omit<MyRequestsQuery, 'type'> & {
+  type?: FolderActionType;
+};
+
 // ============================================
 // 요청자 API (일반 사용자)
 // ============================================
 
-export const fileActionRequestApi = {
+export const folderActionRequestApi = {
   /**
-   * 이동 요청 생성
-   * POST /v1/file-action-requests/move
+   * 폴더 이동 요청 생성
+   * POST /v1/folder-action-requests/move
    */
   createMoveRequest: async (
     token: string,
-    data: CreateMoveRequest,
-  ): Promise<FileActionRequestResponse> => {
-    const response = await api.post('/file-action-requests/move', data, {
+    data: CreateFolderMoveRequest,
+  ): Promise<FolderActionRequestResponse> => {
+    const response = await api.post('/folder-action-requests/move', data, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
   },
 
   /**
-   * 삭제 요청 생성
-   * POST /v1/file-action-requests/delete
-   */
-  createDeleteRequest: async (
-    token: string,
-    data: CreateDeleteRequest,
-  ): Promise<FileActionRequestResponse> => {
-    const response = await api.post('/file-action-requests/delete', data, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    return response.data;
-  },
-
-  /**
-   * 내 요청 목록 조회
-   * GET /v1/file-action-requests/my
+   * 내 폴더 요청 목록 조회
+   * GET /v1/folder-action-requests/my
    */
   getMyRequests: async (
     token: string,
-    query: MyRequestsQuery = {},
-  ): Promise<PaginatedFileActionResponse<FileActionRequestResponse>> => {
+    query: FolderMyRequestsQuery = {},
+  ): Promise<PaginatedFileActionResponse<FolderActionRequestResponse>> => {
     const params = new URLSearchParams();
     if (query.page) params.set('page', String(query.page));
     if (query.pageSize) params.set('pageSize', String(query.pageSize));
@@ -71,10 +61,9 @@ export const fileActionRequestApi = {
     if (query.sortOrder) params.set('sortOrder', query.sortOrder);
     if (query.status) params.set('status', query.status);
     if (query.type) params.set('type', query.type);
-    if (query.targetType) params.set('targetType', query.targetType);
     if (query.role) params.set('role', query.role);
 
-    const response = await api.get(`/file-action-requests/my?${params}`, {
+    const response = await api.get(`/folder-action-requests/my?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -82,13 +71,10 @@ export const fileActionRequestApi = {
 
   /**
    * 승인자 후보 목록 조회
-   * GET /v1/file-action-requests/approvers?type=MOVE|DELETE
+   * GET /v1/folder-action-requests/approvers
    */
-  getApprovers: async (
-    token: string,
-    type: FileActionType,
-  ): Promise<ApproverUser[]> => {
-    const response = await api.get(`/file-action-requests/approvers?type=${type}`, {
+  getApprovers: async (token: string): Promise<ApproverUser[]> => {
+    const response = await api.get('/folder-action-requests/approvers', {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -96,14 +82,14 @@ export const fileActionRequestApi = {
 
   /**
    * 요청 상세 조회
-   * GET /v1/file-action-requests/:id
+   * GET /v1/folder-action-requests/:id
    */
   getRequestDetail: async (
     token: string,
     id: string,
-  ): Promise<FileActionRequestResponse | null> => {
+  ): Promise<FolderActionRequestResponse | null> => {
     try {
-      const response = await api.get(`/file-action-requests/${id}`, {
+      const response = await api.get(`/folder-action-requests/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return response.data;
@@ -117,13 +103,13 @@ export const fileActionRequestApi = {
 
   /**
    * 요청 취소
-   * POST /v1/file-action-requests/:id/cancel
+   * POST /v1/folder-action-requests/:id/cancel
    */
   cancelRequest: async (
     token: string,
     id: string,
-  ): Promise<FileActionRequestResponse> => {
-    const response = await api.post(`/file-action-requests/${id}/cancel`, {}, {
+  ): Promise<FolderActionRequestResponse> => {
+    const response = await api.post(`/folder-action-requests/${id}/cancel`, {}, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -134,21 +120,21 @@ export const fileActionRequestApi = {
 // 관리자 API (Manager/Admin)
 // ============================================
 
-export const fileActionRequestAdminApi = {
+export const folderActionRequestAdminApi = {
   /**
-   * 전체 요청 목록 조회 (필터)
-   * GET /v1/admin/file-action-requests
+   * 전체 폴더 요청 목록 조회 (필터)
+   * GET /v1/admin/folder-action-requests
    */
   getAllRequests: async (
     token: string,
-    query: AdminRequestsQuery = {},
-  ): Promise<PaginatedFileActionResponse<FileActionRequestResponse>> => {
+    query: FolderAdminRequestsQuery = {},
+  ): Promise<PaginatedFileActionResponse<FolderActionRequestResponse>> => {
     const params = new URLSearchParams();
     Object.entries(query).forEach(([key, value]) => {
       if (value !== undefined && value !== '') params.set(key, String(value));
     });
 
-    const response = await api.get(`/admin/file-action-requests?${params}`, {
+    const response = await api.get(`/admin/folder-action-requests?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -156,10 +142,10 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 상태별 요약
-   * GET /v1/admin/file-action-requests/summary
+   * GET /v1/admin/folder-action-requests/summary
    */
   getSummary: async (token: string): Promise<StatusSummary> => {
-    const response = await api.get('/admin/file-action-requests/summary', {
+    const response = await api.get('/admin/folder-action-requests/summary', {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -167,19 +153,19 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 내 승인 대기 목록
-   * GET /v1/admin/file-action-requests/my-pending
+   * GET /v1/admin/folder-action-requests/my-pending
    */
   getMyPendingApprovals: async (
     token: string,
     page = 1,
     pageSize = 20,
-  ): Promise<PaginatedFileActionResponse<FileActionRequestResponse>> => {
+  ): Promise<PaginatedFileActionResponse<FolderActionRequestResponse>> => {
     const params = new URLSearchParams({
       page: String(page),
       pageSize: String(pageSize),
     });
 
-    const response = await api.get(`/admin/file-action-requests/my-pending?${params}`, {
+    const response = await api.get(`/admin/folder-action-requests/my-pending?${params}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -187,14 +173,14 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 요청 상세 조회 (Admin)
-   * GET /v1/admin/file-action-requests/:id
+   * GET /v1/admin/folder-action-requests/:id
    */
   getRequestDetail: async (
     token: string,
     id: string,
-  ): Promise<FileActionRequestResponse | null> => {
+  ): Promise<FolderActionRequestResponse | null> => {
     try {
-      const response = await api.get(`/admin/file-action-requests/${id}`, {
+      const response = await api.get(`/admin/folder-action-requests/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       return response.data;
@@ -208,14 +194,14 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 요청 승인
-   * POST /v1/admin/file-action-requests/:id/approve
+   * POST /v1/admin/folder-action-requests/:id/approve
    */
   approveRequest: async (
     token: string,
     id: string,
     data: ApproveRequest = {},
-  ): Promise<FileActionRequestResponse> => {
-    const response = await api.post(`/admin/file-action-requests/${id}/approve`, data, {
+  ): Promise<FolderActionRequestResponse> => {
+    const response = await api.post(`/admin/folder-action-requests/${id}/approve`, data, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -223,14 +209,14 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 요청 반려
-   * POST /v1/admin/file-action-requests/:id/reject
+   * POST /v1/admin/folder-action-requests/:id/reject
    */
   rejectRequest: async (
     token: string,
     id: string,
     data: RejectRequest,
-  ): Promise<FileActionRequestResponse> => {
-    const response = await api.post(`/admin/file-action-requests/${id}/reject`, data, {
+  ): Promise<FolderActionRequestResponse> => {
+    const response = await api.post(`/admin/folder-action-requests/${id}/reject`, data, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -238,13 +224,13 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 일괄 승인
-   * POST /v1/admin/file-action-requests/bulk-approve
+   * POST /v1/admin/folder-action-requests/bulk-approve
    */
   bulkApprove: async (
     token: string,
     data: BulkApproveRequest,
-  ): Promise<FileActionRequestResponse[]> => {
-    const response = await api.post('/admin/file-action-requests/bulk-approve', data, {
+  ): Promise<FolderActionRequestResponse[]> => {
+    const response = await api.post('/admin/folder-action-requests/bulk-approve', data, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
@@ -252,13 +238,13 @@ export const fileActionRequestAdminApi = {
 
   /**
    * 일괄 반려
-   * POST /v1/admin/file-action-requests/bulk-reject
+   * POST /v1/admin/folder-action-requests/bulk-reject
    */
   bulkReject: async (
     token: string,
     data: BulkRejectRequest,
-  ): Promise<FileActionRequestResponse[]> => {
-    const response = await api.post('/admin/file-action-requests/bulk-reject', data, {
+  ): Promise<FolderActionRequestResponse[]> => {
+    const response = await api.post('/admin/folder-action-requests/bulk-reject', data, {
       headers: { Authorization: `Bearer ${token}` },
     });
     return response.data;
