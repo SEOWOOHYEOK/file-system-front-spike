@@ -8,127 +8,135 @@
 /** 감사 행위 타입 */
 export type AuditAction =
   // 파일 관련
-  | 'FILE_VIEW'
-  | 'FILE_DOWNLOAD'
-  | 'FILE_UPLOAD'
-  | 'FILE_RENAME'
-  | 'FILE_MOVE'
-  | 'FILE_DELETE'
-  | 'FILE_RESTORE'
-  | 'FILE_PURGE'
+  | "FILE_VIEW"
+  | "FILE_DOWNLOAD"
+  | "FILE_UPLOAD"
+  | "FILE_RENAME"
+  | "FILE_MOVE"
+  | "FILE_DELETE"
+  | "FILE_RESTORE"
+  | "FILE_PURGE"
   // 폴더 관련
-  | 'FOLDER_CREATE'
-  | 'FOLDER_VIEW'
-  | 'FOLDER_RENAME'
-  | 'FOLDER_MOVE'
-  | 'FOLDER_DELETE'
+  | "FOLDER_CREATE"
+  | "FOLDER_VIEW"
+  | "FOLDER_RENAME"
+  | "FOLDER_MOVE"
+  | "FOLDER_DELETE"
   // 공유 관련
-  | 'SHARE_CREATE'
-  | 'SHARE_REVOKE'
-  | 'SHARE_ACCESS'
-  | 'SHARE_DOWNLOAD'
-  | 'SHARE_BLOCK'
-  | 'SHARE_UNBLOCK'
-  | 'SHARE_BULK_BLOCK'
-  | 'SHARE_BULK_UNBLOCK'
+  | "SHARE_CREATE"
+  | "SHARE_REVOKE"
+  | "SHARE_ACCESS"
+  | "SHARE_DOWNLOAD"
+  | "SHARE_BLOCK"
+  | "SHARE_UNBLOCK"
+  | "SHARE_BULK_BLOCK"
+  | "SHARE_BULK_UNBLOCK"
   // 공유 요청 관련
-  | 'SHARE_REQUEST_CREATE'
-  | 'SHARE_REQUEST_APPROVE'
-  | 'SHARE_REQUEST_REJECT'
-  | 'SHARE_REQUEST_CANCEL'
-  | 'SHARE_REQUEST_BULK_APPROVE'
-  | 'SHARE_REQUEST_BULK_REJECT'
+  | "SHARE_REQUEST_CREATE"
+  | "SHARE_REQUEST_APPROVE"
+  | "SHARE_REQUEST_REJECT"
+  | "SHARE_REQUEST_CANCEL"
+  | "SHARE_REQUEST_BULK_APPROVE"
+  | "SHARE_REQUEST_BULK_REJECT"
   // 권한 관련
-  | 'PERMISSION_GRANT'
-  | 'PERMISSION_REVOKE'
-  | 'PERMISSION_CHANGE'
+  | "PERMISSION_GRANT"
+  | "PERMISSION_REVOKE"
+  | "PERMISSION_CHANGE"
   // 휴지통 관련
-  | 'TRASH_EMPTY'
-  | 'TRASH_VIEW'
+  | "TRASH_EMPTY"
+  | "TRASH_VIEW"
   // 즐겨찾기 관련
-  | 'FAVORITE_ADD'
-  | 'FAVORITE_REMOVE'
-  | 'FAVORITE_VIEW'
+  | "FAVORITE_ADD"
+  | "FAVORITE_REMOVE"
+  | "FAVORITE_VIEW"
   // 사용자 활동
-  | 'ACTIVITY_VIEW'
+  | "ACTIVITY_VIEW"
   // 외부 사용자 관리
-  | 'EXTERNAL_USER_CREATE'
-  | 'EXTERNAL_USER_UPDATE'
-  | 'EXTERNAL_USER_DEACTIVATE'
-  | 'EXTERNAL_USER_ACTIVATE'
-  | 'EXTERNAL_USER_PASSWORD_RESET'
+  | "EXTERNAL_USER_CREATE"
+  | "EXTERNAL_USER_UPDATE"
+  | "EXTERNAL_USER_DEACTIVATE"
+  | "EXTERNAL_USER_ACTIVATE"
+  | "EXTERNAL_USER_PASSWORD_RESET"
   // 비밀번호
-  | 'PASSWORD_CHANGE'
+  | "PASSWORD_CHANGE"
   // 관리자 작업
-  | 'USER_ROLE_ASSIGN'
-  | 'USER_ROLE_REMOVE'
-  | 'USER_SYNC'
-  | 'TOKEN_GENERATE'
-  | 'TOKEN_REFRESH'
-  | 'ORG_MIGRATION'
+  | "USER_ROLE_ASSIGN"
+  | "USER_ROLE_REMOVE"
+  | "USER_SYNC"
+  | "TOKEN_GENERATE"
+  | "TOKEN_REFRESH"
+  | "ORG_MIGRATION"
   // 파일 작업 요청
-  | 'FILE_ACTION_REQUEST_MOVE_CREATE'
-  | 'FILE_ACTION_REQUEST_DELETE_CREATE'
-  | 'FILE_ACTION_REQUEST_CANCEL'
-  | 'FILE_ACTION_REQUEST_APPROVE'
-  | 'FILE_ACTION_REQUEST_REJECT'
-  | 'FILE_ACTION_REQUEST_BULK_APPROVE'
-  | 'FILE_ACTION_REQUEST_BULK_REJECT'
-  | 'FILE_ACTION_REQUEST_INVALIDATED'
+  | "FILE_ACTION_REQUEST_MOVE_CREATE"
+  | "FILE_ACTION_REQUEST_DELETE_CREATE"
+  | "FILE_ACTION_REQUEST_CANCEL"
+  | "FILE_ACTION_REQUEST_APPROVE"
+  | "FILE_ACTION_REQUEST_REJECT"
+  | "FILE_ACTION_REQUEST_BULK_APPROVE"
+  | "FILE_ACTION_REQUEST_BULK_REJECT"
+  | "FILE_ACTION_REQUEST_INVALIDATED"
   // 외부 사용자 공유 접근
-  | 'EXTERNAL_SHARE_DETAIL'
-  | 'EXTERNAL_SHARE_ACCESS'
-  | 'EXTERNAL_SHARE_DOWNLOAD'
+  | "EXTERNAL_SHARE_DETAIL"
+  | "EXTERNAL_SHARE_ACCESS"
+  | "EXTERNAL_SHARE_DOWNLOAD"
   // 보안 이벤트
-  | 'LOGIN_SUCCESS'
-  | 'LOGIN_FAILURE'
-  | 'LOGOUT'
-  | 'TOKEN_EXPIRED'
-  | 'PERMISSION_DENIED'
-  | 'EXPIRED_LINK_ACCESS'
-  | 'BLOCKED_SHARE_ACCESS'
-  | 'ACCESS_PATTERN_DEVIATION'
-  | 'NEW_DEVICE_ACCESS';
+  | "LOGIN_SUCCESS"
+  | "LOGIN_FAILURE"
+  | "LOGOUT"
+  | "TOKEN_EXPIRED"
+  | "PERMISSION_DENIED"
+  | "EXPIRED_LINK_ACCESS"
+  | "BLOCKED_SHARE_ACCESS"
+  | "ACCESS_PATTERN_DEVIATION"
+  | "NEW_DEVICE_ACCESS";
 
 /** 사용자 유형 */
-export type UserType = 'INTERNAL' | 'EXTERNAL';
+export type UserType = "INTERNAL" | "EXTERNAL";
 
 /** 대상 타입 */
 export type TargetType =
-  | 'FILE'
-  | 'FOLDER'
-  | 'SHARE'
-  | 'USER'
-  | 'FAVORITE'
-  | 'ACTIVITY'
-  | 'SYSTEM'
-  | 'FILE_ACTION_REQUEST';
+  | "FILE"
+  | "FOLDER"
+  | "SHARE"
+  | "USER"
+  | "FAVORITE"
+  | "ACTIVITY"
+  | "SYSTEM"
+  | "FILE_ACTION_REQUEST";
 
 /** 로그 결과 */
-export type LogResult = 'SUCCESS' | 'FAIL';
+export type LogResult = "SUCCESS" | "FAIL";
 
 /** 파일 변경 유형 */
 export type FileChangeType =
-  | 'CREATED'
-  | 'CONTENT_REPLACED'
-  | 'RENAMED'
-  | 'MOVED'
-  | 'METADATA_CHANGED'
-  | 'TRASHED'
-  | 'RESTORED'
-  | 'DELETED';
+  | "CREATED"
+  | "CONTENT_REPLACED"
+  | "RENAMED"
+  | "MOVED"
+  | "METADATA_CHANGED"
+  | "TRASHED"
+  | "RESTORED"
+  | "DELETED";
 
 /** 이벤트 소스 */
-export type EventSource = 'AUDIT' | 'FILE_CHANGE' | 'SYSTEM';
+export type EventSource = "AUDIT" | "FILE_CHANGE" | "SYSTEM";
 
 /** 행위 카테고리 */
-export type ActionCategory = 'file' | 'folder' | 'share' | 'auth' | 'admin' | 'user' | 'security' | 'external';
+export type ActionCategory =
+  | "file"
+  | "folder"
+  | "share"
+  | "auth"
+  | "admin"
+  | "user"
+  | "security"
+  | "external";
 
 /** 클라이언트 타입 */
-export type ClientType = 'WEB' | 'MOBILE' | 'API' | 'UNKNOWN';
+export type ClientType = "WEB" | "MOBILE" | "API" | "UNKNOWN";
 
 /** 기밀 등급 */
-export type Sensitivity = 'PUBLIC' | 'INTERNAL' | 'CONFIDENTIAL';
+export type Sensitivity = "PUBLIC" | "INTERNAL" | "CONFIDENTIAL";
 
 // ─── 응답 타입 ───
 
@@ -247,7 +255,7 @@ export interface ObservabilityEvent {
   actorName?: string;
   targetId?: string;
   targetName?: string;
-  result: 'SUCCESS' | 'FAILURE';
+  result: "SUCCESS" | "FAILURE";
   errorCode?: string;
   severity?: string;
   durationMs?: number;
@@ -321,7 +329,7 @@ export interface TimelineQueryParams {
   to: string;
   eventSources?: EventSource[];
   severity?: string;
-  result?: 'SUCCESS' | 'FAILURE';
+  result?: "SUCCESS" | "FAILURE";
   errorCode?: string;
   page?: number;
   size?: number;
@@ -335,10 +343,69 @@ export interface EntityTimelineParams {
   size?: number;
 }
 
+// ─── 감사 로그 요약 ───
+
+/** 이벤트 타입(카테고리)별 요약 항목 */
+export interface EventTypeSummaryItem {
+  /** 카테고리 코드 */
+  category:
+    | "file"
+    | "folder"
+    | "share"
+    | "auth"
+    | "admin"
+    | "user"
+    | "security"
+    | "external";
+  /** 카테고리 한국어 라벨 */
+  label: string;
+  /** 해당 카테고리의 로그 수 */
+  count: number;
+}
+
+/** 결과 상태별 요약 항목 */
+export interface ResultSummaryItem {
+  /** 결과 코드 */
+  result: "SUCCESS" | "FAIL";
+  /** 결과 한국어 라벨 */
+  label: string;
+  /** 해당 결과의 로그 수 */
+  count: number;
+}
+
+/** 감사 로그 요약 응답 */
+export interface AuditLogSummary {
+  /** 전체 로그 수 */
+  total: number;
+  /** 이벤트 타입(카테고리)별 카운트 */
+  byEventType: EventTypeSummaryItem[];
+  /** 결과 상태별 카운트 */
+  byResult: ResultSummaryItem[];
+}
+
+/** 감사 로그 요약 조회 파라미터 */
+export interface AuditLogSummaryParams {
+  userId?: string;
+  userType?: "INTERNAL" | "EXTERNAL";
+  action?: string;
+  targetType?: string;
+  targetId?: string;
+  result?: "SUCCESS" | "FAIL";
+  ipAddress?: string;
+  startDate?: string; // ISO 8601
+  endDate?: string; // ISO 8601
+}
+
 // ─── UI 헬퍼 타입 ───
 
 /** 이벤트 타입 카테고리 (필터 사이드바용) */
-export type EventTypeCategory = 'all' | 'user_activity' | 'permission' | 'file_operation' | 'share_request' | 'security';
+export type EventTypeCategory =
+  | "all"
+  | "user_activity"
+  | "permission"
+  | "file_operation"
+  | "share_request"
+  | "security";
 
 /** 결과 상태 필터 */
-export type ResultFilter = 'all' | 'SUCCESS' | 'FAIL';
+export type ResultFilter = "all" | "SUCCESS" | "FAIL";
