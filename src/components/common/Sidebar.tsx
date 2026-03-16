@@ -62,6 +62,11 @@ const navItems = [
     icon: '📋',
   },
   {
+    title: '시스템 스케줄(900)',
+    path: '/admin/scheduler',
+    icon: '⏰',
+  },
+  {
     title: '받은 공유 요청(702)',
     path: '/my-received-requests',
     icon: '📬',

@@ -26,6 +26,7 @@ import { AuditLogPage } from './pages/AuditLogPage';
 import { AdminShareManagementPage } from './pages/AdminShareManagementPage';
 import { ExternalFileAccessPage } from './pages/ExternalFileAccessPage';
 import { MyReceivedRequestPage } from './pages/MyReceivedRequestPage';
+import { SchedulerMonitorPage } from './pages/SchedulerMonitorPage';
 
 function App() {
   return (
@@ -60,6 +61,7 @@ function App() {
             <Route path="admin/role-permissions" element={<RolePermissionPage />} />
             <Route path="admin/share-management" element={<AdminShareManagementPage />} />
             <Route path="admin/audit-logs" element={<AuditLogPage />} />
+            <Route path="admin/scheduler" element={<SchedulerMonitorPage />} />
             <Route path="my-received-requests" element={<MyReceivedRequestPage />} />
             <Route path="external-file-access" element={<ExternalFileAccessPage />} />
             <Route path="shares" element={<SharePage />} />
