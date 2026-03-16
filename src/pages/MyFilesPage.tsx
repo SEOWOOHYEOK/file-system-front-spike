@@ -12,6 +12,7 @@ import { trashApi } from "../api/trashApi";
 import { userApi } from "../api/userApi";
 import { adminSystemApi } from "../api/adminApi";
 import { FileDownloadManager } from "../components/FileDownloadManager";
+import { FileViewer } from "../components/FileViewer";
 import { FileUploadModal } from "../components/FileUploadModal";
 import {
   FileSidebar,
@@ -144,6 +145,14 @@ export function MyFilesPage() {
     y: 0,
     item: null,
   });
+
+  // ============================================
+  // 미리보기 상태
+  // ============================================
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFileName, setPreviewFileName] = useState("");
+  const [previewMimeType, setPreviewMimeType] = useState<string | undefined>();
 
   // ============================================
   // 휴지통 상태
@@ -873,6 +882,29 @@ export function MyFilesPage() {
       const item = contextMenu.item;
 
       switch (action) {
+        case "preview":
+          if (item.type === "file") {
+            const fileForPreview = folderContents?.files.find(
+              (f) => f.id === item.id,
+            );
+            (async () => {
+              try {
+                const { blob, mimeType } = await fileApi.preview(
+                  auth.token!,
+                  item.id,
+                );
+                const url = URL.createObjectURL(blob);
+                setPreviewUrl(url);
+                setPreviewFileName(item.name);
+                setPreviewMimeType(fileForPreview?.mimeType || mimeType);
+                setPreviewOpen(true);
+              } catch (err) {
+                console.error("미리보기 실패:", err);
+                alert("파일 미리보기에 실패했습니다.");
+              }
+            })();
+          }
+          break;
         case "open":
           if (item.type === "folder") {
             navigateToFolder(item.id);
@@ -1895,6 +1927,21 @@ export function MyFilesPage() {
           onClose={closeContextMenu}
         />
       )}
+
+      {/* 파일 미리보기 */}
+      <FileViewer
+        isOpen={previewOpen}
+        onClose={() => {
+          setPreviewOpen(false);
+          if (previewUrl) {
+            URL.revokeObjectURL(previewUrl);
+            setPreviewUrl(null);
+          }
+        }}
+        fileUrl={previewUrl}
+        fileName={previewFileName}
+        mimeType={previewMimeType}
+      />
 
       {/* 모달들 */}
       <FileModals

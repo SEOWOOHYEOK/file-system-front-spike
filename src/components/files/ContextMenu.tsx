@@ -55,6 +55,7 @@ export function ContextMenu({
   }, [onClose]);
 
   const fileMenuItems: MenuItem[] = [
+    { id: "preview", label: "미리보기", icon: "👁️" },
     { id: "download", label: "다운로드", icon: "📥" },
     { id: "share", label: "공유", icon: "📨" },
     { id: "rename", label: "이름 변경", icon: "✏️" },

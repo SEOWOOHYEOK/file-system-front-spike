@@ -3,6 +3,7 @@
  * 200.파일 API
  */
 import axios, { AxiosError } from 'axios';
+import apiClient from './apiClient';
 import type {
   FileInfoResponse,
   UploadFileResponse,
@@ -33,19 +34,7 @@ import type {
   DownloadProgress,
 } from '../types/file.types';
 
-const api = axios.create({
-  baseURL: '/v1',
-});
-
-/**
- * 대용량 업로드 전용 API base URL
- * 개발 환경에서 Vite 프록시(http-proxy)는 대량의 바이너리 데이터를
- * Node.js 메모리에 버퍼링하여, 10GB 파일 업로드 시 ~1.5GB 힙 제한에 도달해 죽음.
- * 멀티파트 파트 업로드만 백엔드에 직접 요청하여 프록시를 우회.
- */
-const UPLOAD_API_BASE = import.meta.env.DEV
-  ? (import.meta.env.VITE_API_URL || 'http://localhost:3000') + '/v1'
-  : '/v1';
+// apiClient (baseURL: '/v1') 를 사용하여 모든 요청이 Vite 프록시 → localhost:3000 경유
 
 // API 로그 콜백
 let logCallback: ((log: FileApiLogEntry) => void) | null = null;
@@ -74,7 +63,7 @@ async function apiCall<T>(
   };
 
   try {
-    const response = await api.request<T>({
+    const response = await apiClient.request<T>({
       method,
       url,
       data,
@@ -193,8 +182,7 @@ export const fileApi = {
     token: string,
     fileId: string
   ): Promise<{ blob: Blob; filename: string }> => {
-    const response = await axios.get(`/v1/files/${fileId}/download`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const response = await apiClient.get(`/files/${fileId}/download`, {
       responseType: 'blob',
     });
 
@@ -220,8 +208,7 @@ export const fileApi = {
     token: string,
     fileId: string
   ): Promise<DownloadResponse> => {
-    const response = await axios.get(`/v1/files/${fileId}/download`, {
-      headers: { Authorization: `Bearer ${token}` },
+    const response = await apiClient.get(`/files/${fileId}/download`, {
       responseType: 'blob',
     });
 
@@ -264,9 +251,7 @@ export const fileApi = {
     fileId: string,
     options: RangeDownloadOptions
   ): Promise<DownloadResponse> => {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
-    };
+    const headers: Record<string, string> = {};
 
     // Range 헤더 구성
     if (options.start !== undefined || options.end !== undefined) {
@@ -280,7 +265,7 @@ export const fileApi = {
       headers['If-Range'] = `"${options.ifRange}"`;
     }
 
-    const response = await axios.get(`/v1/files/${fileId}/download`, {
+    const response = await apiClient.get(`/files/${fileId}/download`, {
       headers,
       responseType: 'blob',
       validateStatus: (status) => status === 200 || status === 206 || status === 416,
@@ -649,6 +634,34 @@ export const fileApi = {
   },
 
   /**
+   * 파일 미리보기 (인라인)
+   * GET /v1/files/:fileId/preview
+   * Content-Disposition: inline → 브라우저 렌더링용
+   * 감사 로그: FILE_VIEW
+   */
+  preview: async (
+    token: string,
+    fileId: string
+  ): Promise<{ blob: Blob; filename: string; mimeType: string }> => {
+    const response = await apiClient.get(`/files/${fileId}/preview`, {
+      responseType: 'blob',
+    });
+
+    const contentDisposition = response.headers['content-disposition'];
+    let filename = 'preview';
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename\*=UTF-8''(.+)/);
+      if (filenameMatch) {
+        filename = decodeURIComponent(filenameMatch[1]);
+      }
+    }
+
+    const mimeType = response.headers['content-type'] || 'application/octet-stream';
+
+    return { blob: response.data, filename, mimeType };
+  },
+
+  /**
    * 파일명 변경
    * PUT /v1/files/:fileId/rename
    */
@@ -720,13 +733,12 @@ export const fileApi = {
       };
 
       try {
-        // UPLOAD_API_BASE: 개발 환경에서 Vite 프록시 우회하여 백엔드 직접 요청
-        const response = await axios.put<UploadPartResponse>(
-          `${UPLOAD_API_BASE}/files/multipart/${sessionId}/parts/${partNumber}`,
+        // apiClient를 통해 Vite 프록시 경유 → localhost:3000
+        const response = await apiClient.put<UploadPartResponse>(
+          `/files/multipart/${sessionId}/parts/${partNumber}`,
           data,
           {
             headers: {
-              Authorization: `Bearer ${token}`,
               'Content-Type': 'application/octet-stream',
             },
             timeout: 300000, // 파트당 5분 타임아웃
