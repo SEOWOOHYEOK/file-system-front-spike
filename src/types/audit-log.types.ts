@@ -345,42 +345,30 @@ export interface EntityTimelineParams {
 
 // ─── 감사 로그 요약 ───
 
-/** 이벤트 타입(카테고리)별 요약 항목 */
-export interface EventTypeSummaryItem {
+/** 카테고리별 교차 집계 항목 (백엔드 CategorySummaryItem 매칭) */
+export interface CategorySummaryItem {
   /** 카테고리 코드 */
-  category:
-    | "file"
-    | "folder"
-    | "share"
-    | "auth"
-    | "admin"
-    | "user"
-    | "security"
-    | "external";
+  category: ActionCategory;
   /** 카테고리 한국어 라벨 */
   label: string;
-  /** 해당 카테고리의 로그 수 */
-  count: number;
+  /** 해당 카테고리 전체 로그 수 */
+  totalCount: number;
+  /** 성공 수 */
+  successCount: number;
+  /** 실패 수 */
+  failCount: number;
 }
 
-/** 결과 상태별 요약 항목 */
-export interface ResultSummaryItem {
-  /** 결과 코드 */
-  result: "SUCCESS" | "FAIL";
-  /** 결과 한국어 라벨 */
-  label: string;
-  /** 해당 결과의 로그 수 */
-  count: number;
-}
-
-/** 감사 로그 요약 응답 */
+/** 감사 로그 요약 응답 (백엔드 AuditLogSummary 매칭) */
 export interface AuditLogSummary {
   /** 전체 로그 수 */
-  total: number;
-  /** 이벤트 타입(카테고리)별 카운트 */
-  byEventType: EventTypeSummaryItem[];
-  /** 결과 상태별 카운트 */
-  byResult: ResultSummaryItem[];
+  totalCount: number;
+  /** 전체 성공 수 */
+  totalSuccess: number;
+  /** 전체 실패 수 */
+  totalFail: number;
+  /** 카테고리별 성공/실패 카운트 */
+  byCategory: CategorySummaryItem[];
 }
 
 /** 감사 로그 요약 조회 파라미터 */
@@ -409,3 +397,16 @@ export type EventTypeCategory =
 
 /** 결과 상태 필터 */
 export type ResultFilter = "all" | "SUCCESS" | "FAIL";
+
+/** 시간 버켓 */
+export interface TimeBucket {
+  bucketStart: string;
+  bucketEnd: string;
+  count: number;
+}
+
+/** 시간 버켓 결과 */
+export interface TimeBucketResult {
+  bucketSeconds: number;
+  buckets: TimeBucket[];
+}

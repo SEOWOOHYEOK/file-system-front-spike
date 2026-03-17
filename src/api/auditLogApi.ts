@@ -20,6 +20,7 @@ import type {
   TimelineQueryParams,
   EntityTimelineParams,
   TargetType,
+  TimeBucketResult,
 } from "../types/audit-log.types";
 
 // ─── 로그 콜백 ───
@@ -264,6 +265,33 @@ export const auditLogApi = {
     const url = `/v1/admin/timeline/events/${eventId}/chain`;
     const { data } = await apiClient.get<ObservabilityEvent[]>(url);
     log("GET", url, 200, data);
+    return data;
+  },
+
+  // ── 16. 시간대별 로그 버켓 조회 ──
+  async getAuditLogTimes(
+    params: { startDate?: string; endDate?: string } = {},
+  ): Promise<TimeBucketResult> {
+    const qs = buildQuery(params);
+    const url = `/v1/admin/audit-logs/times${qs ? `?${qs}` : ""}`;
+    const { data } = await apiClient.get<TimeBucketResult>(url, {
+      baseURL: AUDIT_BASE,
+    });
+    log("GET", url, 200, data);
+    return data;
+  },
+
+  // ── 17. 감사 로그 CSV 내보내기 ──
+  async exportAuditLogsCsv(
+    params: { startDate?: string; endDate?: string } = {},
+  ): Promise<Blob> {
+    const qs = buildQuery(params);
+    const url = `/v1/admin/audit-logs/export/csv${qs ? `?${qs}` : ""}`;
+    const { data } = await apiClient.get<Blob>(url, {
+      baseURL: AUDIT_BASE,
+      responseType: "blob",
+    });
+    log("GET", url, 200, "[blob]");
     return data;
   },
 };

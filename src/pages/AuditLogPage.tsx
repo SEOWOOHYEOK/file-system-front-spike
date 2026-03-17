@@ -34,6 +34,7 @@ import type {
   ActionCategory,
   EventTypeCategory,
   ResultFilter,
+  TimeBucket,
 } from "../types/audit-log.types";
 
 // ─── 상수 ───
@@ -327,28 +328,15 @@ function FilterPanel({
 
 // ─── 서브 컴포넌트: 타임라인 차트 ───
 
-function TimelineChart({ logs }: { logs: AuditLog[] }) {
+function TimelineChart({ buckets }: { buckets: TimeBucket[] }) {
   const chartData = useMemo(() => {
-    if (logs.length === 0) return [];
-    const buckets = new Map<
-      string,
-      { time: string; count: number; success: number; fail: number }
-    >();
-    for (const log of logs) {
-      const d = new Date(log.createdAt);
-      const key = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-      if (!buckets.has(key)) {
-        buckets.set(key, { time: key, count: 0, success: 0, fail: 0 });
-      }
-      const b = buckets.get(key)!;
-      b.count++;
-      if (log.result === "SUCCESS") b.success++;
-      else b.fail++;
-    }
-    return Array.from(buckets.values()).sort((a, b) =>
-      a.time.localeCompare(b.time),
-    );
-  }, [logs]);
+    if (buckets.length === 0) return [];
+    return buckets.map((b) => {
+      const d = new Date(b.bucketStart);
+      const time = `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      return { time, count: b.count };
+    });
+  }, [buckets]);
 
   if (chartData.length === 0) return null;
 
@@ -370,21 +358,11 @@ function TimelineChart({ logs }: { logs: AuditLog[] }) {
           <YAxis hide />
           <Tooltip
             contentStyle={{ fontSize: 11, padding: "4px 8px" }}
-            formatter={(value, name) => [
-              String(value),
-              name === "success" ? "성공" : "실패",
-            ]}
+            formatter={(value: number) => [String(value), "건수"]}
           />
           <Bar
-            dataKey='success'
-            fill='#10b981'
-            stackId='a'
-            radius={[1, 1, 0, 0]}
-          />
-          <Bar
-            dataKey='fail'
-            fill='#ef4444'
-            stackId='a'
+            dataKey='count'
+            fill='#6366f1'
             radius={[1, 1, 0, 0]}
           />
         </BarChart>
@@ -1317,22 +1295,19 @@ function SummaryDashboard({
     );
   }
 
-  const successCount =
-    summary.byResult.find((r) => r.result === "SUCCESS")?.count ?? 0;
-  const failCount =
-    summary.byResult.find((r) => r.result === "FAIL")?.count ?? 0;
+  const successCount = summary.totalSuccess;
+  const failCount = summary.totalFail;
   const successRate =
-    summary.total > 0
-      ? ((successCount / summary.total) * 100).toFixed(1)
+    summary.totalCount > 0
+      ? ((successCount / summary.totalCount) * 100).toFixed(1)
       : "0.0";
 
-  const pieData = summary.byResult.map((r) => ({
-    name: r.label,
-    value: r.count,
-    result: r.result,
-  }));
+  const pieData = [
+    { name: "성공", value: summary.totalSuccess, result: "SUCCESS" },
+    { name: "실패", value: summary.totalFail, result: "FAIL" },
+  ];
 
-  const barData = [...summary.byEventType].sort((a, b) => b.count - a.count);
+  const barData = [...summary.byCategory].sort((a, b) => b.totalCount - a.totalCount);
 
   return (
     <div className='flex-1 overflow-y-auto p-6 space-y-6'>
@@ -1342,7 +1317,7 @@ function SummaryDashboard({
         <div className='bg-white border border-gray-200 rounded-xl p-5 shadow-sm'>
           <p className='text-xs font-medium text-gray-500 mb-1'>전체 로그</p>
           <p className='text-3xl font-bold text-gray-900'>
-            {summary.total.toLocaleString()}
+            {summary.totalCount.toLocaleString()}
           </p>
           <p className='text-xs text-gray-400 mt-1'>
             조회 기간 내 총 감사 로그 수
@@ -1366,8 +1341,8 @@ function SummaryDashboard({
           </p>
           <p className='text-xs text-red-500 mt-1'>
             전체 대비{" "}
-            {summary.total > 0
-              ? ((failCount / summary.total) * 100).toFixed(1)
+            {summary.totalCount > 0
+              ? ((failCount / summary.totalCount) * 100).toFixed(1)
               : "0.0"}
             %
           </p>
@@ -1379,7 +1354,7 @@ function SummaryDashboard({
             이벤트 카테고리
           </p>
           <p className='text-3xl font-bold text-blue-700'>
-            {summary.byEventType.length}
+            {summary.byCategory.length}
           </p>
           <p className='text-xs text-blue-500 mt-1'>활성 카테고리 수</p>
         </div>
@@ -1429,7 +1404,7 @@ function SummaryDashboard({
                     "로그 수",
                   ]}
                 />
-                <Bar dataKey='count' radius={[0, 4, 4, 0]} barSize={24}>
+                <Bar dataKey='totalCount' radius={[0, 4, 4, 0]} barSize={24}>
                   {barData.map((entry) => (
                     <Cell
                       key={entry.category}
@@ -1453,7 +1428,7 @@ function SummaryDashboard({
           <h3 className='text-sm font-semibold text-gray-800 mb-4'>
             결과 상태 비율
           </h3>
-          {pieData.length > 0 && summary.total > 0 ? (
+          {pieData.length > 0 && summary.totalCount > 0 ? (
             <ResponsiveContainer width='100%' height={280}>
               <PieChart>
                 <Pie
@@ -1514,8 +1489,8 @@ function SummaryDashboard({
         <div className='grid grid-cols-4 gap-3'>
           {barData.map((item) => {
             const pct =
-              summary.total > 0
-                ? ((item.count / summary.total) * 100).toFixed(1)
+              summary.totalCount > 0
+                ? ((item.totalCount / summary.totalCount) * 100).toFixed(1)
                 : "0.0";
             return (
               <div
@@ -1533,14 +1508,14 @@ function SummaryDashboard({
                 <p
                   className={`text-xl font-bold ${SUMMARY_CATEGORY_TEXT[item.category] || "text-gray-700"}`}
                 >
-                  {item.count.toLocaleString()}
+                  {item.totalCount.toLocaleString()}
                 </p>
                 {/* 프로그레스 바 */}
                 <div className='mt-2 h-1.5 bg-white/60 rounded-full overflow-hidden'>
                   <div
                     className='h-full rounded-full transition-all duration-500'
                     style={{
-                      width: `${Math.min(100, summary.total > 0 ? (item.count / summary.total) * 100 : 0)}%`,
+                      width: `${Math.min(100, summary.totalCount > 0 ? (item.totalCount / summary.totalCount) * 100 : 0)}%`,
                       backgroundColor:
                         SUMMARY_CATEGORY_COLORS[item.category] || "#94a3b8",
                     }}
@@ -1583,6 +1558,9 @@ export function AuditLogPage() {
   const [timelineResponse, setTimelineResponse] =
     useState<UnifiedTimelineResponse | null>(null);
   const [timelinePage, setTimelinePage] = useState(1);
+
+  // ── 상태: 시간 버켓 ──
+  const [timeBuckets, setTimeBuckets] = useState<TimeBucket[]>([]);
 
   // ── 상태: 요약 ──
   const [summaryData, setSummaryData] = useState<AuditLogSummary | null>(null);
@@ -1630,11 +1608,15 @@ export function AuditLogPage() {
           startDate: from,
           endDate: to,
         };
-        const result = await auditLogApi.getAuditLogs(params);
+        const [result, timesResult] = await Promise.all([
+          auditLogApi.getAuditLogs(params),
+          auditLogApi.getAuditLogTimes({ startDate: from, endDate: to }),
+        ]);
         setAuditLogs(result.data);
         setAuditTotal(result.total);
         setAuditTotalPages(result.totalPages);
         setAuditPage(result.page);
+        setTimeBuckets(timesResult.buckets);
       } catch (err) {
         setError(err instanceof Error ? err.message : "감사 로그 조회 실패");
       } finally {
@@ -1934,7 +1916,7 @@ export function AuditLogPage() {
     closeDetail,
   ]);
 
-  // ── 내보내기 (CSV) ──
+  // ── 내보내기 (CSV) - 클라이언트 생성 ──
   const handleExport = useCallback(() => {
     let csv = "";
     if (viewTab === "audit") {
@@ -1966,6 +1948,25 @@ export function AuditLogPage() {
     showToast("CSV 내보내기 완료");
   }, [viewTab, filteredAuditLogs, fileHistories, timelineResponse, showToast]);
 
+  // ── 내보내기 (CSV) - 서버 API ──
+  const handleExportCsv = useCallback(async () => {
+    try {
+      const timeRange = getTimeRange(period);
+      const blob = await auditLogApi.exportAuditLogsCsv({
+        startDate: timeRange.from,
+        endDate: timeRange.to,
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-logs-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error("CSV export failed:", err);
+    }
+  }, [period]);
+
   // ── 인증 체크 ──
   if (!auth.isAuthenticated) {
     return (
@@ -1979,7 +1980,7 @@ export function AuditLogPage() {
     selectedAuditLog || selectedFileHistory || selectedTimelineEvent;
 
   return (
-    <div className='h-full flex flex-col bg-gray-50'>
+    <div className='-m-6 h-[calc(100%+3rem)] flex flex-col bg-gray-50'>
       {/* 토스트 */}
       {toast && (
         <div
@@ -2080,6 +2081,12 @@ export function AuditLogPage() {
         >
           내보내기
         </button>
+        <button
+          onClick={handleExportCsv}
+          className='flex items-center gap-1.5 px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors'
+        >
+          ⬇ 내보내기
+        </button>
       </div>
 
       {/* 메인 콘텐츠 */}
@@ -2108,7 +2115,7 @@ export function AuditLogPage() {
         {/* 메인 영역 */}
         <div className='flex-1 flex flex-col overflow-hidden'>
           {/* 타임라인 차트 (감사 로그 탭에서만) */}
-          {viewTab === "audit" && <TimelineChart logs={filteredAuditLogs} />}
+          {viewTab === "audit" && <TimelineChart buckets={timeBuckets} />}
 
           {/* 통합 타임라인 요약 */}
           {viewTab === "timeline" && timelineResponse && (
