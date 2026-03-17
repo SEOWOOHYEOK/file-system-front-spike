@@ -1,510 +1,332 @@
 /**
- * SyncDashboardPage - 동기화 대시보드
- * 동기화 이벤트 상태 요약 + 이벤트 목록 테이블 (필터, 검색, 페이지네이션)
+ * SyncDashboardPage - 문서 모니터링 화면
+ * sync-query API 기반 (/v1/admin/sync-query/*)
  */
 import { useState, useEffect, useCallback } from 'react';
-import { useInternalAuth } from '../hooks/useInternalAuth';
-import { syncDashboardApi } from '../api/syncDashboardApi';
+import { syncQueryApi } from '../api/syncQueryApi';
 import type {
-  SyncDashboardSummaryResponse,
-  SyncDashboardEventsResponse,
-  SyncDashboardEventItem,
-  SyncDashboardEventsQuery,
-  SyncEventStatus,
-  SyncEventType,
-  SyncEventTargetType,
-} from '../types/sync-dashboard';
+  SyncDisplayStatus,
+  SyncQuerySummaryResponse,
+  SyncQueryEventItem,
+  SyncQueryEventListResponse,
+  SyncQueryUploader,
+} from '../types/sync-query.types';
 
-// ─── 상수 & 매핑 ───
+// ─── 상수 ───
 
-const STATUS_CONFIG: Record<SyncEventStatus, { label: string; color: string; bg: string; dot: string }> = {
-  PENDING: { label: '대기', color: 'text-gray-700', bg: 'bg-gray-100', dot: 'bg-gray-400' },
-  QUEUED: { label: '큐 대기', color: 'text-blue-700', bg: 'bg-blue-50', dot: 'bg-blue-400' },
-  PROCESSING: { label: '진행중', color: 'text-amber-700', bg: 'bg-amber-50', dot: 'bg-amber-400' },
-  RETRYING: { label: '재시도', color: 'text-orange-700', bg: 'bg-orange-50', dot: 'bg-orange-400' },
-  DONE: { label: '완료', color: 'text-green-700', bg: 'bg-green-50', dot: 'bg-green-400' },
-  FAILED: { label: '실패', color: 'text-red-700', bg: 'bg-red-50', dot: 'bg-red-500' },
+const STATUS_CONFIG: Record<SyncDisplayStatus, { color: string; bg: string; dot: string }> = {
+  '정상': { color: 'text-green-700', bg: 'bg-green-50', dot: 'bg-green-400' },
+  '동기화 중': { color: 'text-blue-700', bg: 'bg-blue-50', dot: 'bg-blue-400' },
+  '오류': { color: 'text-red-700', bg: 'bg-red-50', dot: 'bg-red-500' },
+  '대기': { color: 'text-gray-700', bg: 'bg-gray-100', dot: 'bg-gray-400' },
 };
 
-const EVENT_TYPE_CONFIG: Record<SyncEventType, { label: string; color: string; bg: string }> = {
-  CREATE: { label: '업로드', color: 'text-blue-700', bg: 'bg-blue-50' },
-  MOVE: { label: '이동', color: 'text-purple-700', bg: 'bg-purple-50' },
-  DELETE: { label: '삭제', color: 'text-red-700', bg: 'bg-red-50' },
-  RENAME: { label: '이름변경', color: 'text-cyan-700', bg: 'bg-cyan-50' },
-  TRASH: { label: '휴지통', color: 'text-gray-700', bg: 'bg-gray-100' },
-  RESTORE: { label: '복구', color: 'text-emerald-700', bg: 'bg-emerald-50' },
-  PURGE: { label: '완전삭제', color: 'text-rose-700', bg: 'bg-rose-50' },
-};
+const DISPLAY_STATUSES: (SyncDisplayStatus | '전체')[] = ['전체', '정상', '동기화 중', '오류', '대기'];
 
-const TARGET_TYPE_CONFIG: Record<SyncEventTargetType, { label: string; icon: string }> = {
-  FILE: { label: '파일', icon: '📄' },
-  FOLDER: { label: '폴더', icon: '📁' },
-};
-
-type StatusFilter = SyncEventStatus | 'ALL';
-
-const STATUS_FILTER_ITEMS: { key: StatusFilter; label: string }[] = [
-  { key: 'ALL', label: '전체' },
-  { key: 'PENDING', label: '대기' },
-  { key: 'QUEUED', label: '큐 대기' },
-  { key: 'PROCESSING', label: '진행중' },
-  { key: 'RETRYING', label: '재시도' },
-  { key: 'DONE', label: '완료' },
-  { key: 'FAILED', label: '실패' },
+const PERIOD_OPTIONS = [
+  { value: '1', label: '1일' },
+  { value: '7', label: '7일' },
+  { value: '30', label: '30일' },
 ];
 
-// ─── 유틸리티 ───
+// ─── 유틸 ───
 
-function formatDuration(seconds: number | null): string {
-  if (seconds === null || seconds === undefined) return '-';
-  if (seconds < 60) return `${seconds}초`;
-  const min = Math.floor(seconds / 60);
-  const sec = seconds % 60;
-  if (min < 60) return sec > 0 ? `${min}분 ${sec}초` : `${min}분`;
-  const hr = Math.floor(min / 60);
-  const remainMin = min % 60;
-  return `${hr}시간 ${remainMin}분`;
+function formatFileSize(bytes: number | null): string {
+  if (bytes === null || bytes === undefined) return '-';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  return d.toLocaleString('ko-KR', {
+function formatDate(iso: string): string {
+  return new Date(iso).toLocaleDateString('ko-KR', {
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
   });
 }
 
 function formatRelativeTime(iso: string): string {
-  const now = new Date();
-  const d = new Date(iso);
-  const diff = Math.floor((now.getTime() - d.getTime()) / 1000);
+  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
   if (diff < 60) return '방금 전';
   if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
   if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
   return `${Math.floor(diff / 86400)}일 전`;
 }
 
-// ─── 상태 배지 컴포넌트 ───
+function getDateRange(days: number): { fromDate: string; toDate: string } {
+  const now = new Date();
+  const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+  return {
+    fromDate: from.toISOString().slice(0, 10),
+    toDate: now.toISOString().slice(0, 10),
+  };
+}
 
-function StatusBadge({ status }: { status: SyncEventStatus }) {
-  const config = STATUS_CONFIG[status];
+// ─── 상태 배지 ───
+
+function StatusBadge({ status }: { status: string }) {
+  const config = STATUS_CONFIG[status as SyncDisplayStatus];
+  if (!config) return <span className="text-xs text-gray-500">{status}</span>;
   return (
     <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.color}`}>
       <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
-      {config.label}
+      {status}
     </span>
   );
 }
 
-function EventTypeBadge({ eventType }: { eventType: SyncEventType }) {
-  const config = EVENT_TYPE_CONFIG[eventType];
-  return (
-    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${config.bg} ${config.color}`}>
-      {config.label}
-    </span>
-  );
-}
-
-function TargetTypeBadge({ targetType }: { targetType: SyncEventTargetType }) {
-  const config = TARGET_TYPE_CONFIG[targetType];
-  return (
-    <span className="inline-flex items-center gap-1 text-xs text-gray-600">
-      <span>{config.icon}</span>
-      {config.label}
-    </span>
-  );
-}
-
-// ─── 메인 페이지 컴포넌트 ───
+// ─── 메인 컴포넌트 ───
 
 export function SyncDashboardPage() {
-  const { auth } = useInternalAuth();
-
   // 상태
-  const [summary, setSummary] = useState<SyncDashboardSummaryResponse | null>(null);
-  const [events, setEvents] = useState<SyncDashboardEventsResponse | null>(null);
+  const [summary, setSummary] = useState<SyncQuerySummaryResponse | null>(null);
+  const [listData, setListData] = useState<SyncQueryEventListResponse | null>(null);
+  const [uploaders, setUploaders] = useState<SyncQueryUploader[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 필터
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>('ALL');
-  const [eventTypeFilter, setEventTypeFilter] = useState<SyncEventType | ''>('');
-  const [targetTypeFilter, setTargetTypeFilter] = useState<SyncEventTargetType | ''>('');
-  const [searchKeyword, setSearchKeyword] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [statusFilter, setStatusFilter] = useState<SyncDisplayStatus | '전체'>('전체');
+  const [searchFileName, setSearchFileName] = useState('');
+  const [selectedUploader, setSelectedUploader] = useState('');
+  const [periodDays, setPeriodDays] = useState('1');
 
   // 페이지네이션
   const [page, setPage] = useState(1);
   const [pageSize] = useState(20);
 
-  // 정렬
-  const [sortBy, setSortBy] = useState('createdAt');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-
-  // 자동 새로고침
-  const [autoRefresh, setAutoRefresh] = useState(false);
+  // 자동 갱신
+  const [autoRefresh, setAutoRefresh] = useState(true);
 
   // ─── 데이터 로드 ───
 
+  const dateRange = getDateRange(Number(periodDays));
+
   const loadSummary = useCallback(async () => {
-    if (!auth.token) return;
     try {
-      const data = await syncDashboardApi.getSummary(auth.token);
+      const data = await syncQueryApi.getSummary(dateRange);
       setSummary(data);
     } catch (err) {
-      console.error('Failed to load summary:', err);
+      console.error('Summary load failed:', err);
     }
-  }, [auth.token]);
+  }, [dateRange.fromDate, dateRange.toDate]);
 
-  const loadEvents = useCallback(async () => {
-    if (!auth.token) return;
+  const loadList = useCallback(async () => {
     setLoading(true);
     setError(null);
-
     try {
-      const query: SyncDashboardEventsQuery = {
+      const params: Record<string, unknown> = {
+        ...dateRange,
         page,
         pageSize,
-        sortBy,
-        sortOrder,
       };
+      if (statusFilter !== '전체') params.status = statusFilter;
+      if (searchFileName.trim()) params.fileName = searchFileName.trim();
 
-      if (statusFilter !== 'ALL') query.status = statusFilter;
-      if (eventTypeFilter) query.eventType = eventTypeFilter;
-      if (targetTypeFilter) query.targetType = targetTypeFilter;
-      if (fromDate) query.fromDate = fromDate;
-      if (toDate) query.toDate = toDate;
-
-      const data = await syncDashboardApi.getEvents(auth.token, query);
-      setEvents(data);
+      const data = await syncQueryApi.getList(params as any);
+      setListData(data);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : '이벤트 목록을 불러오는데 실패했습니다.';
-      setError(msg);
+      setError(err instanceof Error ? err.message : '목록 조회 실패');
     } finally {
       setLoading(false);
     }
-  }, [auth.token, page, pageSize, statusFilter, eventTypeFilter, targetTypeFilter, fromDate, toDate, sortBy, sortOrder]);
+  }, [dateRange.fromDate, dateRange.toDate, statusFilter, searchFileName, page, pageSize]);
+
+  const loadUploaders = useCallback(async () => {
+    try {
+      const data = await syncQueryApi.getUploaders(dateRange);
+      setUploaders(data.uploaders);
+    } catch (err) {
+      console.error('Uploaders load failed:', err);
+    }
+  }, [dateRange.fromDate, dateRange.toDate]);
 
   // 초기 로드
   useEffect(() => {
     loadSummary();
-    loadEvents();
-  }, [loadSummary, loadEvents]);
+    loadList();
+    loadUploaders();
+  }, [loadSummary, loadList, loadUploaders]);
 
-  // 자동 새로고침 (30초)
+  // 자동 갱신 (10초)
   useEffect(() => {
     if (!autoRefresh) return;
     const interval = setInterval(() => {
       loadSummary();
-      loadEvents();
-    }, 30000);
+      loadList();
+    }, 10000);
     return () => clearInterval(interval);
-  }, [autoRefresh, loadSummary, loadEvents]);
+  }, [autoRefresh, loadSummary, loadList]);
 
-  // 필터 변경시 페이지 리셋
-  const handleStatusFilter = (status: StatusFilter) => {
-    setStatusFilter(status);
+  // 필터 변경 시 페이지 리셋
+  const handleStatusFilter = (s: SyncDisplayStatus | '전체') => {
+    setStatusFilter(s);
     setPage(1);
   };
 
-  const handleSort = (column: string) => {
-    if (sortBy === column) {
-      setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(column);
-      setSortOrder('desc');
-    }
+  const handleSearch = () => {
     setPage(1);
+    loadList();
   };
 
   const handleRefresh = () => {
     loadSummary();
-    loadEvents();
+    loadList();
+    loadUploaders();
   };
 
-  // 검색 필터링 (클라이언트 사이드)
-  const filteredItems = events?.items.filter((item) => {
-    if (!searchKeyword) return true;
-    const keyword = searchKeyword.toLowerCase();
-    return (
-      item.fileName.toLowerCase().includes(keyword) ||
-      item.filePath.toLowerCase().includes(keyword) ||
-      item.requester.name.toLowerCase().includes(keyword) ||
-      (item.requester.department && item.requester.department.toLowerCase().includes(keyword))
-    );
+  // 업로더 필터링 (클라이언트 사이드)
+  const filteredItems = listData?.items.filter((item) => {
+    if (!selectedUploader) return true;
+    return item.uploaderName === selectedUploader;
   }) ?? [];
 
-  // ─── 미인증 ───
-
-  if (!auth.isAuthenticated) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <div className="text-4xl mb-4">🔒</div>
-          <h2 className="text-xl font-semibold text-gray-700 mb-2">인증이 필요합니다</h2>
-          <p className="text-gray-500">우측 상단에서 로그인해 주세요.</p>
-        </div>
-      </div>
-    );
-  }
-
-  // ─── 요약 카운트 계산 ───
-
-  const getStatusCount = (key: StatusFilter): number => {
-    if (!summary) return 0;
-    if (key === 'ALL') return summary.total;
-    const map: Record<string, number> = {
-      PENDING: summary.pending,
-      QUEUED: summary.queued,
-      PROCESSING: summary.processing,
-      RETRYING: summary.retrying,
-      DONE: summary.done,
-      FAILED: summary.failed,
-    };
-    return map[key] ?? 0;
-  };
+  // ─── 렌더링 ───
 
   return (
     <div className="flex gap-0 h-full -m-6">
-      {/* ─── 좌측 사이드바: 상태 필터 ─── */}
-      <div className="w-48 bg-white border-r border-gray-200 flex flex-col shrink-0">
-        {/* 헤더 */}
+      {/* 좌측 사이드바 */}
+      <div className="w-52 bg-white border-r border-gray-200 flex flex-col shrink-0">
+        {/* 기간 선택 */}
         <div className="p-4 border-b border-gray-100">
-          <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">동기화 상태</h2>
+          <select
+            value={periodDays}
+            onChange={(e) => { setPeriodDays(e.target.value); setPage(1); }}
+            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+          >
+            {PERIOD_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            ))}
+          </select>
         </div>
 
-        {/* 필터 목록 */}
-        <nav className="flex-1 py-2">
-          {STATUS_FILTER_ITEMS.map((item) => {
-            const count = getStatusCount(item.key);
-            const isActive = statusFilter === item.key;
-            return (
-              <button
-                key={item.key}
-                onClick={() => handleStatusFilter(item.key)}
-                className={`w-full flex items-center justify-between px-4 py-2.5 text-sm transition-colors ${
-                  isActive
-                    ? 'bg-blue-50 text-blue-700 font-medium border-r-2 border-blue-500'
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <span>{item.label}</span>
-                <span
-                  className={`min-w-[24px] h-5 flex items-center justify-center rounded-full text-xs font-medium ${
-                    item.key === 'FAILED' && count > 0
-                      ? 'bg-red-100 text-red-700'
-                      : isActive
-                      ? 'bg-blue-100 text-blue-700'
-                      : 'bg-gray-100 text-gray-500'
-                  } px-1.5`}
+        {/* 상태 필터 */}
+        <div className="p-3 border-b border-gray-100">
+          <h3 className="text-xs font-semibold text-gray-500 mb-2">상태</h3>
+          <nav className="space-y-0.5">
+            {DISPLAY_STATUSES.map((s) => {
+              const count = s === '전체'
+                ? (summary?.total ?? 0)
+                : (summary?.counts[s] ?? 0);
+              const isActive = statusFilter === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => handleStatusFilter(s)}
+                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-sm rounded transition-colors ${
+                    isActive
+                      ? 'bg-blue-50 text-blue-700 font-medium'
+                      : 'text-gray-600 hover:bg-gray-50'
+                  }`}
                 >
-                  {count}
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+                  <span>{s}</span>
+                  <span className={`min-w-[24px] h-5 flex items-center justify-center rounded-full text-xs font-medium px-1.5 ${
+                    isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
+                  }`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </nav>
+        </div>
 
-        {/* Stuck 경고 */}
-        {summary && summary.stuckCount > 0 && (
-          <div className="p-3 mx-3 mb-3 bg-amber-50 border border-amber-200 rounded-lg">
-            <div className="flex items-center gap-2">
-              <span className="text-amber-500">⚠️</span>
-              <div>
-                <p className="text-xs font-medium text-amber-800">Stuck 감지</p>
-                <p className="text-xs text-amber-600">{summary.stuckCount}건이 지연됨</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 마지막 체크 시각 */}
-        {summary && (
-          <div className="p-3 border-t border-gray-100 text-xs text-gray-400">
-            마지막 확인: {formatRelativeTime(summary.checkedAt)}
-          </div>
-        )}
+        {/* 업로더 필터 */}
+        <div className="p-3">
+          <h3 className="text-xs font-semibold text-gray-500 mb-2">업로더</h3>
+          <select
+            value={selectedUploader}
+            onChange={(e) => setSelectedUploader(e.target.value)}
+            className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+          >
+            <option value="">전체</option>
+            {uploaders.map((u) => (
+              <option key={u.userId} value={u.name}>{u.name}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
-      {/* ─── 메인 콘텐츠 ─── */}
+      {/* 메인 콘텐츠 */}
       <div className="flex-1 flex flex-col min-w-0 bg-white">
-        {/* 상단 헤더 & 도구 */}
+        {/* 상단 툴바 */}
         <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center justify-between mb-4">
-            <div className="flex items-center gap-3">
-              <h1 className="text-lg font-bold text-gray-900">File Sync</h1>
-              {summary && (
-                <span className="text-sm text-gray-500">
-                  총 {summary.total.toLocaleString()}건
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {/* 자동 새로고침 토글 */}
-              <button
-                onClick={() => setAutoRefresh(!autoRefresh)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                  autoRefresh
-                    ? 'bg-blue-50 border-blue-200 text-blue-700'
-                    : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
-                }`}
-                title={autoRefresh ? '자동 새로고침 켜짐 (30초)' : '자동 새로고침 끔'}
-              >
-                <span className={autoRefresh ? 'animate-spin' : ''}>🔄</span>
-                자동
-              </button>
-              {/* 새로고침 */}
-              <button
-                onClick={handleRefresh}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                새로고침
-              </button>
-            </div>
-          </div>
+          <div className="flex items-center gap-3">
+            {/* 필터 표시 */}
+            <button className="px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-600">
+              필터
+            </button>
 
-          {/* 검색 & 필터 */}
-          <div className="flex items-center gap-3 flex-wrap">
-            {/* 검색 */}
-            <div className="relative flex-1 min-w-[280px]">
-              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">🔍</span>
+            {/* 파일명 검색 */}
+            <div className="relative flex-1 max-w-md">
               <input
                 type="text"
-                placeholder="파일명, 경로, 사용자명으로 검색..."
-                value={searchKeyword}
-                onChange={(e) => setSearchKeyword(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder="파일명 검색..."
+                value={searchFileName}
+                onChange={(e) => setSearchFileName(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">🔍</span>
             </div>
 
-            {/* 이벤트 타입 필터 */}
-            <select
-              value={eventTypeFilter}
-              onChange={(e) => {
-                setEventTypeFilter(e.target.value as SyncEventType | '');
-                setPage(1);
-              }}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            <div className="flex-1" />
+
+            {/* 새로고침 */}
+            <button
+              onClick={handleRefresh}
+              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
+              title="새로고침"
             >
-              <option value="">이벤트 전체</option>
-              {Object.entries(EVENT_TYPE_CONFIG).map(([key, val]) => (
-                <option key={key} value={key}>{val.label}</option>
-              ))}
-            </select>
+              🔄
+            </button>
 
-            {/* 대상 타입 필터 */}
-            <select
-              value={targetTypeFilter}
-              onChange={(e) => {
-                setTargetTypeFilter(e.target.value as SyncEventTargetType | '');
-                setPage(1);
-              }}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+            {/* 자동 갱신 토글 */}
+            <button
+              onClick={() => setAutoRefresh(!autoRefresh)}
+              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+                autoRefresh
+                  ? 'bg-blue-50 border-blue-200 text-blue-700'
+                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              }`}
             >
-              <option value="">구분 전체</option>
-              <option value="FILE">📄 파일</option>
-              <option value="FOLDER">📁 폴더</option>
-            </select>
-
-            {/* 날짜 필터 */}
-            <input
-              type="date"
-              value={fromDate}
-              onChange={(e) => { setFromDate(e.target.value); setPage(1); }}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="시작일"
-            />
-            <span className="text-gray-400 text-sm">~</span>
-            <input
-              type="date"
-              value={toDate}
-              onChange={(e) => { setToDate(e.target.value); setPage(1); }}
-              className="px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              placeholder="종료일"
-            />
-
-            {/* 필터 초기화 */}
-            {(eventTypeFilter || targetTypeFilter || fromDate || toDate || searchKeyword) && (
-              <button
-                onClick={() => {
-                  setEventTypeFilter('');
-                  setTargetTypeFilter('');
-                  setFromDate('');
-                  setToDate('');
-                  setSearchKeyword('');
-                  setPage(1);
-                }}
-                className="px-3 py-2 text-xs text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                ✕ 초기화
-              </button>
-            )}
+              자동 갱신(10초)
+              <span className={`w-8 h-4 rounded-full relative transition-colors ${autoRefresh ? 'bg-blue-500' : 'bg-gray-300'}`}>
+                <span className={`absolute w-3 h-3 rounded-full bg-white top-0.5 transition-all ${autoRefresh ? 'left-4' : 'left-0.5'}`} />
+              </span>
+            </button>
           </div>
         </div>
 
-        {/* 에러 표시 */}
+        {/* 에러 */}
         {error && (
-          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center gap-2">
-            <span>⚠️</span>
+          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
             {error}
-            <button onClick={handleRefresh} className="ml-auto text-red-600 hover:text-red-800 font-medium">
-              재시도
-            </button>
+            <button onClick={handleRefresh} className="ml-2 text-red-600 font-medium">재시도</button>
           </div>
         )}
 
         {/* 테이블 */}
         <div className="flex-1 overflow-auto">
-          <table className="w-full min-w-[1100px]">
+          <table className="w-full">
             <thead className="bg-gray-50 sticky top-0 z-10">
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
-                  상태
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">상태</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">파일명</th>
+                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 w-20">크기</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-20">업로더</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-28 cursor-pointer">
+                  업로드일 ↓
                 </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">
-                  이벤트
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">
-                  구분
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  파일명
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider">
-                  경로
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider w-24">
-                  사용자
-                </th>
-                <th
-                  className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-20 cursor-pointer hover:text-gray-700"
-                  onClick={() => handleSort('createdAt')}
-                >
-                  크기
-                  {sortBy === 'createdAt' && (
-                    <span className="ml-1">{sortOrder === 'asc' ? '↑' : '↓'}</span>
-                  )}
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider w-20">
-                  소요
-                </th>
-                <th className="px-4 py-3 text-center text-xs font-semibold text-gray-500 uppercase tracking-wider w-16">
-                  재시도
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider min-w-[200px]">
-                  비고
-                </th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">마지막 동기화</th>
+                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">비고</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {loading && !events ? (
+              {loading && !listData ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-16 text-center">
+                  <td colSpan={7} className="px-4 py-16 text-center">
                     <div className="flex flex-col items-center gap-2">
                       <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
                       <span className="text-sm text-gray-500">불러오는 중...</span>
@@ -513,16 +335,44 @@ export function SyncDashboardPage() {
                 </tr>
               ) : filteredItems.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-16 text-center">
-                    <div className="flex flex-col items-center gap-2 text-gray-400">
-                      <span className="text-3xl">📭</span>
-                      <span className="text-sm">동기화 이벤트가 없습니다.</span>
-                    </div>
+                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400 text-sm">
+                    동기화 이벤트가 없습니다.
                   </td>
                 </tr>
               ) : (
                 filteredItems.map((item) => (
-                  <EventRow key={item.id} item={item} />
+                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3">
+                      <StatusBadge status={item.displayStatus} />
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex flex-col">
+                        <span className="text-sm font-medium text-gray-900 truncate max-w-[280px]">{item.fileName}</span>
+                        <span className="text-xs text-gray-400 truncate max-w-[280px]">{item.folderPath}</span>
+                      </div>
+                    </td>
+                    <td className="px-4 py-3 text-right text-sm text-gray-600">
+                      {formatFileSize(item.fileSize)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {item.uploaderName}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-600">
+                      {formatDate(item.uploadedAt)}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      {formatRelativeTime(item.uploadedAt)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {item.remarks ? (
+                        <span className="text-xs text-red-600" title={item.remarks}>
+                          {item.remarks}
+                        </span>
+                      ) : (
+                        <span className="text-xs text-gray-300">-</span>
+                      )}
+                    </td>
+                  </tr>
                 ))
               )}
             </tbody>
@@ -530,35 +380,25 @@ export function SyncDashboardPage() {
         </div>
 
         {/* 페이지네이션 */}
-        {events && events.totalPages > 1 && (
+        {listData && listData.totalPages > 1 && (
           <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between bg-white">
             <span className="text-sm text-gray-500">
-              총 {events.totalItems.toLocaleString()}건 중 {((events.page - 1) * events.pageSize) + 1}
-              -{Math.min(events.page * events.pageSize, events.totalItems)}건
+              전체 {listData.total.toLocaleString()}건 표시 완료
             </span>
             <div className="flex items-center gap-1">
               <button
-                onClick={() => setPage(1)}
-                disabled={!events.hasPrev}
-                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                ««
-              </button>
-              <button
                 onClick={() => setPage(page - 1)}
-                disabled={!events.hasPrev}
-                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={page <= 1}
+                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
               >
                 «
               </button>
-              {generatePageNumbers(events.page, events.totalPages).map((p) => (
+              {Array.from({ length: Math.min(listData.totalPages, 7) }, (_, i) => i + 1).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPage(p)}
                   className={`px-2.5 py-1.5 text-xs rounded border transition-colors ${
-                    p === events.page
-                      ? 'bg-blue-500 text-white border-blue-500'
-                      : 'border-gray-200 hover:bg-gray-50'
+                    p === page ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-200 hover:bg-gray-50'
                   }`}
                 >
                   {p}
@@ -566,17 +406,10 @@ export function SyncDashboardPage() {
               ))}
               <button
                 onClick={() => setPage(page + 1)}
-                disabled={!events.hasNext}
-                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                disabled={page >= listData.totalPages}
+                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
               >
                 »
-              </button>
-              <button
-                onClick={() => setPage(events.totalPages)}
-                disabled={!events.hasNext}
-                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-              >
-                »»
               </button>
             </div>
           </div>
@@ -584,127 +417,4 @@ export function SyncDashboardPage() {
       </div>
     </div>
   );
-}
-
-// ─── 이벤트 행 컴포넌트 ───
-
-function EventRow({ item }: { item: SyncDashboardEventItem }) {
-  const isError = item.status === 'FAILED';
-  const isStuck = item.isStuck;
-
-  return (
-    <tr
-      className={`hover:bg-gray-50 transition-colors ${
-        isError ? 'bg-red-50/40' : isStuck ? 'bg-amber-50/40' : ''
-      }`}
-    >
-      {/* 상태 */}
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-1.5">
-          <StatusBadge status={item.status} />
-          {isStuck && (
-            <span className="text-amber-500 text-xs" title="Stuck: 장시간 지연">⚠</span>
-          )}
-        </div>
-      </td>
-
-      {/* 이벤트 타입 */}
-      <td className="px-4 py-3">
-        <EventTypeBadge eventType={item.eventType} />
-      </td>
-
-      {/* 구분 */}
-      <td className="px-4 py-3">
-        <TargetTypeBadge targetType={item.targetType} />
-      </td>
-
-      {/* 파일명 */}
-      <td className="px-4 py-3">
-        <span className="text-sm font-medium text-gray-900 truncate block max-w-[200px]" title={item.fileName}>
-          {item.fileName}
-        </span>
-      </td>
-
-      {/* 경로 */}
-      <td className="px-4 py-3">
-        <span className="text-xs text-gray-500 truncate block max-w-[250px]" title={item.filePath}>
-          {item.filePath}
-        </span>
-      </td>
-
-      {/* 사용자 */}
-      <td className="px-4 py-3">
-        <div className="flex flex-col">
-          <span className="text-sm text-gray-900">{item.requester.name}</span>
-          {item.requester.department && (
-            <span className="text-xs text-gray-400">{item.requester.department}</span>
-          )}
-        </div>
-      </td>
-
-      {/* 크기 */}
-      <td className="px-4 py-3 text-right">
-        <span className="text-sm text-gray-600">
-          {item.fileSizeFormatted ?? (item.targetType === 'FOLDER' ? '-' : '0 B')}
-        </span>
-      </td>
-
-      {/* 소요 */}
-      <td className="px-4 py-3 text-right">
-        <span className="text-sm text-gray-600">{formatDuration(item.duration)}</span>
-      </td>
-
-      {/* 재시도 */}
-      <td className="px-4 py-3 text-center">
-        {item.retryCount > 0 ? (
-          <span className={`text-sm font-medium ${item.retryCount >= item.maxRetries ? 'text-red-600' : 'text-amber-600'}`}>
-            {item.retryCount}/{item.maxRetries}
-          </span>
-        ) : (
-          <span className="text-sm text-gray-300">-</span>
-        )}
-      </td>
-
-      {/* 비고 */}
-      <td className="px-4 py-3">
-        {item.errorMessage ? (
-          <div className="flex items-start gap-1.5">
-            <span className="text-red-500 mt-0.5 shrink-0">⚠️</span>
-            <span className="text-xs text-red-600 line-clamp-2" title={item.errorMessage}>
-              {item.errorMessage}
-            </span>
-          </div>
-        ) : item.completedAt ? (
-          <span className="text-xs text-gray-400" title={formatDateTime(item.completedAt)}>
-            {formatRelativeTime(item.completedAt)}
-          </span>
-        ) : (
-          <span className="text-xs text-gray-300">-</span>
-        )}
-      </td>
-    </tr>
-  );
-}
-
-// ─── 페이지 번호 생성 ───
-
-function generatePageNumbers(current: number, total: number): number[] {
-  const pages: number[] = [];
-  const maxVisible = 7;
-
-  if (total <= maxVisible) {
-    for (let i = 1; i <= total; i++) pages.push(i);
-  } else {
-    const half = Math.floor(maxVisible / 2);
-    let start = Math.max(1, current - half);
-    const end = Math.min(total, start + maxVisible - 1);
-
-    if (end - start < maxVisible - 1) {
-      start = Math.max(1, end - maxVisible + 1);
-    }
-
-    for (let i = start; i <= end; i++) pages.push(i);
-  }
-
-  return pages;
 }
