@@ -673,37 +673,16 @@ export function AdminPage() {
     }
   }, [auth.token]);
 
-  const handleEmptyTrash = useCallback(async () => {
-    if (!auth.token) return;
-    if (!confirm('휴지통을 비우시겠습니까? 모든 파일이 영구 삭제됩니다.')) return;
-    try {
-      await trashApi.emptyTrash(auth.token);
-      await fetchTrashList();
-    } catch (error) {
-      console.error('Failed to empty trash:', error);
-    }
-  }, [auth.token, fetchTrashList]);
-
   const handlePurgeFile = useCallback(async (trashMetadataId: string, fileName: string) => {
     if (!auth.token) return;
     if (!confirm(`"${fileName}" 파일을 영구 삭제하시겠습니까?`)) return;
     try {
-      await trashApi.purgeFile(auth.token, trashMetadataId);
+      await trashApi.purge(auth.token, trashMetadataId);
       await fetchTrashList();
     } catch (error) {
       console.error('Failed to purge file:', error);
     }
   }, [auth.token, fetchTrashList]);
-
-  const handleRestorePreview = useCallback(async (trashMetadataIds: string[]) => {
-    if (!auth.token) return;
-    try {
-      const preview = await trashApi.previewRestore(auth.token, { trashMetadataIds });
-      alert(JSON.stringify(preview, null, 2));
-    } catch (error) {
-      console.error('Failed to preview restore:', error);
-    }
-  }, [auth.token]);
 
   const handleRestoreExecute = useCallback(async (trashMetadataId: string, fileName: string) => {
     if (!auth.token) return;
@@ -1458,12 +1437,9 @@ export function AdminPage() {
                     {loading.trash ? '조회 중...' : '조회'}
                   </button>
                   {trashList && trashList.items.length > 0 && (
-                    <button
-                      onClick={handleEmptyTrash}
-                      className="text-sm text-red-500 hover:text-red-600"
-                    >
-                      휴지통 비우기
-                    </button>
+                    <span className="text-sm text-gray-500">
+                      {trashList.totalCount}개 항목
+                    </span>
                   )}
                 </div>
               </div>
@@ -1481,8 +1457,10 @@ export function AdminPage() {
                       <table className="min-w-full text-sm">
                         <thead>
                           <tr className="border-b">
-                            <th className="text-left py-2 px-2">파일명</th>
+                            <th className="text-left py-2 px-2">타입</th>
+                            <th className="text-left py-2 px-2">이름</th>
                             <th className="text-left py-2 px-2">크기</th>
+                            <th className="text-left py-2 px-2">삭제자</th>
                             <th className="text-left py-2 px-2">삭제일</th>
                             <th className="text-left py-2 px-2">만료일</th>
                             <th className="text-left py-2 px-2">상태</th>
@@ -1490,50 +1468,54 @@ export function AdminPage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {trashList.items.map((item) => (
-                            <tr key={item.id} className="border-b hover:bg-gray-50">
-                              <td className="py-2 px-2">{item.name}</td>
-                              <td className="py-2 px-2">{formatBytes(item.sizeBytes)}</td>
-                              <td className="py-2 px-2">{new Date(item.deletedAt).toLocaleDateString()}</td>
-                              <td className="py-2 px-2">
-                                {new Date(item.expiresAt).toLocaleDateString()}
-                                <span className="text-xs text-gray-500 ml-1">
-                                  ({item.daysUntilExpiry}일 남음)
-                                </span>
-                              </td>
-                              <td className="py-2 px-2">
-                                <span className={`px-2 py-0.5 rounded text-xs ${
-                                  item.restoreInfo.pathStatus === 'AVAILABLE'
-                                    ? 'bg-green-100 text-green-800'
-                                    : 'bg-yellow-100 text-yellow-800'
-                                }`}>
-                                  {item.restoreInfo.pathStatus === 'AVAILABLE' ? '복원 가능' : '경로 없음'}
-                                </span>
-                              </td>
-                              <td className="py-2 px-2">
-                                <div className="flex space-x-1">
-                                  <button
-                                    onClick={() => handleRestorePreview([item.trashMetadataId])}
-                                    className="px-2 py-1 text-xs bg-gray-100 hover:bg-gray-200 rounded"
-                                  >
-                                    미리보기
-                                  </button>
-                                  <button
-                                    onClick={() => handleRestoreExecute(item.trashMetadataId, item.name)}
-                                    className="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 rounded"
-                                  >
-                                    복원
-                                  </button>
-                                  <button
-                                    onClick={() => handlePurgeFile(item.trashMetadataId, item.name)}
-                                    className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
-                                  >
-                                    삭제
-                                  </button>
-                                </div>
-                              </td>
-                            </tr>
-                          ))}
+                          {trashList.items.map((item) => {
+                            const name = item.type === 'FILE' ? item.fileInfo.name : item.folderInfo.name;
+                            const size = item.type === 'FILE' ? item.fileInfo.sizeBytes : item.totalSizeBytes;
+                            return (
+                              <tr key={item.id} className="border-b hover:bg-gray-50">
+                                <td className="py-2 px-2">
+                                  <span className={`px-1.5 py-0.5 rounded text-xs ${
+                                    item.type === 'FILE' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
+                                  }`}>{item.type}</span>
+                                </td>
+                                <td className="py-2 px-2">{name}</td>
+                                <td className="py-2 px-2">{formatBytes(size)}</td>
+                                <td className="py-2 px-2">{item.deleteUserInfo.name}</td>
+                                <td className="py-2 px-2">{new Date(item.deletedAt).toLocaleDateString()}</td>
+                                <td className="py-2 px-2">
+                                  {new Date(item.expiresAt).toLocaleDateString()}
+                                  <span className="text-xs text-gray-500 ml-1">
+                                    ({item.daysUntilExpiry}일 남음)
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2">
+                                  <span className={`px-2 py-0.5 rounded text-xs ${
+                                    item.restoreInfo.pathStatus === 'AVAILABLE'
+                                      ? 'bg-green-100 text-green-800'
+                                      : 'bg-yellow-100 text-yellow-800'
+                                  }`}>
+                                    {item.restoreInfo.pathStatus === 'AVAILABLE' ? '복원 가능' : '경로 없음'}
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2">
+                                  <div className="flex space-x-1">
+                                    <button
+                                      onClick={() => handleRestoreExecute(item.id, name)}
+                                      className="px-2 py-1 text-xs bg-green-100 hover:bg-green-200 rounded"
+                                    >
+                                      복원
+                                    </button>
+                                    <button
+                                      onClick={() => handlePurgeFile(item.id, name)}
+                                      className="px-2 py-1 text-xs bg-red-100 hover:bg-red-200 rounded"
+                                    >
+                                      삭제
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
                         </tbody>
                       </table>
                     </div>

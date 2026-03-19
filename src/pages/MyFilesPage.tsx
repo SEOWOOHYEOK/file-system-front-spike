@@ -616,26 +616,35 @@ export function MyFilesPage() {
   // ============================================
   // 휴지통
   // ============================================
-  const fetchTrashList = useCallback(async () => {
-    if (!auth.token) return;
-    setLoading((prev) => ({ ...prev, trash: true }));
-    try {
-      const response = await trashApi.getList(auth.token);
-      setTrashList(response);
-    } catch (error) {
-      console.error("Failed to fetch trash list:", error);
-    } finally {
-      setLoading((prev) => ({ ...prev, trash: false }));
-    }
-  }, [auth.token]);
+  const fetchTrashList = useCallback(
+    async (query?: { page?: number; type?: string; search?: string }) => {
+      if (!auth.token) return;
+      setLoading((prev) => ({ ...prev, trash: true }));
+      try {
+        const response = await trashApi.getList(auth.token, query);
+        setTrashList(response);
+      } catch (error) {
+        console.error("Failed to fetch trash list:", error);
+      } finally {
+        setLoading((prev) => ({ ...prev, trash: false }));
+      }
+    },
+    [auth.token],
+  );
 
   const handleRestoreFromTrash = useCallback(
     async (trashMetadataId: string) => {
       if (!auth.token) return;
       try {
-        await trashApi.executeRestore(auth.token, {
+        const result = await trashApi.executeRestore(auth.token, {
           items: [{ trashMetadataId }],
         });
+        if (result.skippedItems.length > 0) {
+          const reasons = result.skippedItems
+            .map((s) => `${s.fileName}: ${s.message || s.reason}`)
+            .join("\n");
+          alert(`일부 항목 복원 실패:\n${reasons}`);
+        }
         await fetchTrashList();
       } catch (error) {
         console.error("Failed to restore:", error);
@@ -651,7 +660,7 @@ export function MyFilesPage() {
       if (!confirm("영구 삭제하시겠습니까? 이 작업은 되돌릴 수 없습니다."))
         return;
       try {
-        await trashApi.purgeFile(auth.token, trashMetadataId);
+        await trashApi.purge(auth.token, trashMetadataId);
         await fetchTrashList();
       } catch (error) {
         console.error("Failed to permanent delete:", error);
@@ -660,19 +669,6 @@ export function MyFilesPage() {
     },
     [auth.token, fetchTrashList],
   );
-
-  const handleEmptyTrash = useCallback(async () => {
-    if (!auth.token) return;
-    if (!confirm("휴지통을 비우시겠습니까? 모든 파일이 영구 삭제됩니다."))
-      return;
-    try {
-      await trashApi.emptyTrash(auth.token);
-      await fetchTrashList();
-    } catch (error) {
-      console.error("Failed to empty trash:", error);
-      alert("휴지통 비우기에 실패했습니다.");
-    }
-  }, [auth.token, fetchTrashList]);
 
   // ============================================
   // 최근 활동 (무한 스크롤)
@@ -1464,7 +1460,6 @@ export function MyFilesPage() {
               trashList={trashList}
               onRestore={handleRestoreFromTrash}
               onPermanentDelete={handlePermanentDelete}
-              onEmptyTrash={handleEmptyTrash}
               onRefresh={fetchTrashList}
             />
           )}

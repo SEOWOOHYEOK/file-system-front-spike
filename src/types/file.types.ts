@@ -384,19 +384,9 @@ export interface DeleteFolderResponse {
 // ============================================
 
 /**
- * 휴지통 정렬 기준
+ * 휴지통 목록 타입 필터
  */
-export type TrashSortBy = 'name' | 'sizeBytes' | 'mimeType' | 'deletedAt' | 'expiresAt' | 'deletedBy';
-
-/**
- * 휴지통 정렬 순서
- */
-export type TrashSortOrder = 'asc' | 'desc';
-
-/**
- * MIME 카테고리
- */
-export type MimeCategory = 'image' | 'video' | 'audio' | 'document' | 'archive' | 'other';
+export type TrashListTypeFilter = 'ALL' | 'FILE' | 'FOLDER';
 
 /**
  * 복원 경로 상태
@@ -405,45 +395,35 @@ export type RestorePathStatus = 'AVAILABLE' | 'NOT_FOUND';
 
 /**
  * 휴지통 목록 조회 쿼리 파라미터
+ * GET /v1/trash
  */
 export interface TrashListQuery {
   page?: number;
   limit?: number;
-  sortBy?: TrashSortBy;
-  order?: TrashSortOrder;
+  type?: TrashListTypeFilter;
   search?: string;
-  mimeType?: string;
-  mimeCategory?: MimeCategory;
-  deletedBy?: string;
-  deletedAfter?: string;
-  deletedBefore?: string;
-  expiresAfter?: string;
-  expiresBefore?: string;
-  minSize?: number;
-  maxSize?: number;
-  originalFolderId?: string;
 }
 
 /**
- * 휴지통 아이템
+ * 삭제 사용자 정보
  */
-export interface TrashItem {
-  type: 'FILE';
+export interface DeleteUserInfo {
   id: string;
   name: string;
-  sizeBytes: number;
-  mimeType: string;
-  extension: string;
-  trashMetadataId: string;
+  email: string | null;
+  departmentName: string | null;
+}
+
+/**
+ * 휴지통 아이템 공통 필드
+ */
+interface TrashItemBase {
+  id: string;
   originalPath: string;
-  originalFolderId: string;
-  originalFolderName: string;
-  deletedAt: string;
-  deletedBy: string;
-  deletedByName: string;
+  deleteUserInfo: DeleteUserInfo;
   expiresAt: string;
   daysUntilExpiry: number;
-  createdAt: string;
+  deletedAt: string;
   restoreInfo: {
     pathStatus: RestorePathStatus;
     resolveFolderId: string | null;
@@ -451,7 +431,39 @@ export interface TrashItem {
 }
 
 /**
+ * 휴지통 파일 아이템
+ */
+export interface TrashFileItem extends TrashItemBase {
+  type: 'FILE';
+  fileInfo: {
+    id: string;
+    name: string;
+    sizeBytes: number;
+    mimeType: string;
+  };
+  createdAt: string;
+}
+
+/**
+ * 휴지통 폴더 아이템
+ */
+export interface TrashFolderItem extends TrashItemBase {
+  type: 'FOLDER';
+  folderInfo: {
+    id: string;
+    name: string;
+  };
+  totalSizeBytes: number;
+}
+
+/**
+ * 휴지통 아이템 (Discriminated Union)
+ */
+export type TrashItem = TrashFileItem | TrashFolderItem;
+
+/**
  * 휴지통 목록 응답
+ * GET /v1/trash
  */
 export interface TrashListResponse {
   items: TrashItem[];
@@ -464,52 +476,7 @@ export interface TrashListResponse {
     hasNext: boolean;
     hasPrev: boolean;
   };
-  appliedFilters: {
-    search?: string;
-    mimeType?: string;
-    mimeCategory?: string;
-    deletedBy?: string;
-    dateRange?: { from?: string; to?: string };
-    sizeRange?: { min?: number; max?: number };
-  };
-}
-
-/**
- * 복원 미리보기 요청
- */
-export interface RestorePreviewRequest {
-  trashMetadataIds?: string[];
-}
-
-/**
- * 복원 미리보기 응답 항목
- */
-export interface RestorePreviewItem {
-  trashMetadataId: string;
-  fileId: string;
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  deletedAt: string;
-  pathStatus: RestorePathStatus;
-  originalPath: string;
-  originalFolderId: string;
-  resolveFolderId: string | null;
-  hasConflict: boolean;
-  conflictFileId?: string;
-}
-
-/**
- * 복원 미리보기 응답
- */
-export interface RestorePreviewResponse {
-  totalCount: number;
-  items: RestorePreviewItem[];
-  summary: {
-    available: number;
-    notFound: number;
-    conflict: number;
-  };
+  search?: string;
 }
 
 /**
@@ -523,6 +490,7 @@ export interface RestoreExecuteItem {
 
 /**
  * 복원 실행 요청
+ * POST /v1/trash/restore/execute
  */
 export interface RestoreExecuteRequest {
   items: RestoreExecuteItem[];
@@ -540,51 +508,21 @@ export interface RestoreExecuteResponse {
   skippedItems: {
     trashMetadataId: string;
     fileName: string;
-    reason: 'CONFLICT' | 'PATH_NOT_FOUND';
+    reason: 'CONFLICT' | 'PATH_NOT_FOUND' | 'NOT_IN_TRASH';
     conflictFileId?: string;
-  }[];
-}
-
-/**
- * 복원 상태 조회 응답
- */
-export interface RestoreStatusResponse {
-  summary: {
-    total: number;
-    pending: number;
-    processing: number;
-    done: number;
-    failed: number;
-  };
-  isCompleted: boolean;
-  items: {
-    syncEventId: string;
-    fileId: string;
-    fileName: string;
-    status: 'PENDING' | 'PROCESSING' | 'DONE' | 'FAILED';
-    errorMessage?: string;
-    createdAt: string;
-    processedAt?: string;
+    message?: string;
   }[];
 }
 
 /**
  * 영구삭제 응답
+ * DELETE /v1/trash/{trashMetadataId}
  */
 export interface PurgeResponse {
   id: string;
   name: string;
-  type: 'FILE';
+  type: 'FILE' | 'FOLDER';
   purgedAt: string;
-}
-
-/**
- * 휴지통 비우기 응답
- */
-export interface EmptyTrashResponse {
-  message: string;
-  success: number;
-  failed: number;
 }
 
 // ============================================

@@ -1,18 +1,19 @@
 /**
  * Trash API Client
  * 220.휴지통 API
+ *
+ * 3개 API만 사용:
+ *   GET    /v1/trash                      - 휴지통 목록 조회
+ *   DELETE /v1/trash/{trashMetadataId}     - 영구삭제
+ *   POST   /v1/trash/restore/execute       - 복원 실행
  */
 import axios, { AxiosError } from 'axios';
 import type {
   TrashListQuery,
   TrashListResponse,
-  RestorePreviewRequest,
-  RestorePreviewResponse,
   RestoreExecuteRequest,
   RestoreExecuteResponse,
-  RestoreStatusResponse,
   PurgeResponse,
-  EmptyTrashResponse,
   FileApiLogEntry,
 } from '../types/file.types';
 
@@ -61,7 +62,7 @@ async function apiCall<T>(
     logEntry.status = response.status;
     logEntry.duration = Date.now() - startTime;
     logEntry.response = response.data;
-    
+
     if (logCallback) {
       logCallback(logEntry);
     }
@@ -69,7 +70,7 @@ async function apiCall<T>(
     return response.data;
   } catch (error) {
     logEntry.duration = Date.now() - startTime;
-    
+
     if (axios.isAxiosError(error)) {
       const axiosError = error as AxiosError;
       logEntry.status = axiosError.response?.status || 0;
@@ -78,11 +79,11 @@ async function apiCall<T>(
     } else {
       logEntry.error = error instanceof Error ? error.message : 'Unknown error';
     }
-    
+
     if (logCallback) {
       logCallback(logEntry);
     }
-    
+
     throw error;
   }
 }
@@ -106,16 +107,6 @@ export const trashApi = {
     ),
 
   /**
-   * 복원 미리보기 (경로 상태 확인)
-   * POST /v1/trash/restore/preview
-   */
-  previewRestore: (
-    token: string,
-    request: RestorePreviewRequest
-  ): Promise<RestorePreviewResponse> =>
-    apiCall<RestorePreviewResponse>('POST', '/trash/restore/preview', token, request),
-
-  /**
    * 복원 실행
    * POST /v1/trash/restore/execute
    */
@@ -126,34 +117,11 @@ export const trashApi = {
     apiCall<RestoreExecuteResponse>('POST', '/trash/restore/execute', token, request),
 
   /**
-   * 복원 상태 조회
-   * GET /v1/trash/restore/status
+   * 영구삭제
+   * DELETE /v1/trash/{trashMetadataId}
    */
-  getRestoreStatus: (
-    token: string,
-    syncEventIds: string[]
-  ): Promise<RestoreStatusResponse> =>
-    apiCall<RestoreStatusResponse>(
-      'GET',
-      '/trash/restore/status',
-      token,
-      undefined,
-      { syncEventIds: syncEventIds.join(',') }
-    ),
-
-  /**
-   * 파일 영구삭제
-   * DELETE /v1/trash/files/:trashMetadataId
-   */
-  purgeFile: (token: string, trashMetadataId: string): Promise<PurgeResponse> =>
-    apiCall<PurgeResponse>('DELETE', `/trash/files/${trashMetadataId}`, token),
-
-  /**
-   * 휴지통 비우기
-   * DELETE /v1/trash/all
-   */
-  emptyTrash: (token: string): Promise<EmptyTrashResponse> =>
-    apiCall<EmptyTrashResponse>('DELETE', '/trash/all', token),
+  purge: (token: string, trashMetadataId: string): Promise<PurgeResponse> =>
+    apiCall<PurgeResponse>('DELETE', `/trash/${trashMetadataId}`, token),
 };
 
 export default trashApi;
