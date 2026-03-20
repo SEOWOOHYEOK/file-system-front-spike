@@ -42,6 +42,13 @@ export const tokenStorage = {
     localStorage.setItem(TOKEN_KEYS.TOKEN_EXPIRES_AT, String(expiresAt));
   },
 
+  /** accessToken + expiresAt만 갱신 (V2 refresh는 refreshToken을 로테이션하지 않음) */
+  saveAccessToken: (accessToken: string, expiresIn: number) => {
+    localStorage.setItem(TOKEN_KEYS.ACCESS_TOKEN, accessToken);
+    const expiresAt = Date.now() + expiresIn * 1000;
+    localStorage.setItem(TOKEN_KEYS.TOKEN_EXPIRES_AT, String(expiresAt));
+  },
+
   saveUser: (user: unknown, userType: string) => {
     localStorage.setItem(TOKEN_KEYS.USER, JSON.stringify(user));
     localStorage.setItem(TOKEN_KEYS.USER_TYPE, userType);
@@ -126,16 +133,16 @@ apiClient.interceptors.response.use(
 
         // 갱신 요청은 별도의 axios 인스턴스로 (인터셉터 무한 루프 방지)
         const { data } = await axios.post<RefreshTokenResponse>(
-          '/v1/auth/refresh-token',
+          '/v2/auth/refresh-token',
           { refreshToken },
         );
 
-        // 새 토큰 저장
-        tokenStorage.saveTokens(data.accessToken, data.refreshToken, data.expiresIn);
+        // accessToken만 갱신 (V2는 refreshToken을 로테이션하지 않음)
+        tokenStorage.saveAccessToken(data.accessToken, data.expiresIn);
 
         // 토큰 갱신 이벤트 발행 (AuthContext에서 상태 동기화용)
         window.dispatchEvent(new CustomEvent('auth:tokens-refreshed', {
-          detail: { accessToken: data.accessToken, refreshToken: data.refreshToken, expiresIn: data.expiresIn },
+          detail: { accessToken: data.accessToken, expiresIn: data.expiresIn },
         }));
 
         // 대기 중인 요청들 처리

@@ -1,7 +1,6 @@
 /**
  * 인증 API 타입 정의
- * POST /v1/auth/login, refresh-token, logout, verify-token
- * (generate-token 테스트용 제외)
+ * POST /v2/auth/login, refresh-token
  */
 
 // ─── 공통 ───
@@ -17,6 +16,8 @@ export interface UserInfo {
   name?: string;
   /** 이메일 */
   email?: string;
+  /** 역할 */
+  role: string;
 }
 
 // ─── 로그인 ───
@@ -30,72 +31,35 @@ export interface LoginRequest {
 
 export interface LoginResponse {
   success: boolean;
-  /** JWT 액세스 토큰 (API 호출 시 Authorization 헤더에 사용) */
+  /** SSO 액세스 토큰 */
   accessToken: string;
-  /** 리프레시 토큰 (토큰 갱신 시 사용, opaque 문자열) */
+  /** SSO 리프레시 토큰 */
   refreshToken: string;
-  /**
-   * @deprecated accessToken과 동일 (하위 호환용, 향후 제거 예정)
-   */
-  token: string;
+  /** SSO 리프레시 토큰 만료 시각 */
+  refreshTokenExpiresAt: string;
+  /** 액세스 토큰 만료 시간 (초) */
+  expiresIn: number;
   /** 사용자 정보 */
   user: UserInfo;
-  /** 사용자 타입 (내부/외부) */
-  userType: UserType;
-  /** 액세스 토큰 만료 시간 (초, 기본 1800 = 30분) */
-  expiresIn: number;
 }
 
 // ─── 토큰 갱신 ───
 
 export interface RefreshTokenRequest {
-  /** DMS 리프레시 토큰 (필수) */
+  /** SSO 리프레시 토큰 (필수) */
   refreshToken: string;
 }
 
 export interface RefreshTokenResponse {
   success: boolean;
-  /** 새 JWT 액세스 토큰 */
+  /** 새 SSO 액세스 토큰 */
   accessToken: string;
-  /** 새 리프레시 토큰 (로테이션됨, 기존 토큰은 무효) */
-  refreshToken: string;
+  /** SSO 리프레시 토큰 만료 시각 */
+  refreshTokenExpiresAt: string;
   /** 액세스 토큰 만료 시간 (초) */
   expiresIn: number;
-}
-
-// ─── 로그아웃 ───
-
-export interface LogoutResponse {
-  success: boolean;
-  message: string;
-}
-
-// ─── 토큰 검증 ───
-
-export interface VerifyTokenRequest {
-  /** 검증할 JWT 토큰 (필수) */
-  token: string;
-}
-
-export interface VerifyTokenResponse {
-  /** 토큰 유효 여부 */
-  valid: boolean;
-  /** 유효한 경우 payload 정보 */
-  payload?: {
-    /** 사용자 ID */
-    sub: string;
-    /** 사용자 타입 */
-    type: UserType;
-    /** 발급 시간 (Unix timestamp) */
-    iat: number;
-    /** 만료 시간 (Unix timestamp) */
-    exp: number;
-    [key: string]: unknown;
-  };
-  /** 검증 실패 시 오류 메시지 */
-  error?: string;
-  /** 만료 여부 */
-  expired?: boolean;
+  /** 갱신된 역할 */
+  role: string;
 }
 
 // ─── 에러 응답 ───
@@ -137,8 +101,6 @@ export interface AuthContextValue {
   logout: () => Promise<void>;
   /** 토큰 갱신 */
   refresh: () => Promise<RefreshTokenResponse>;
-  /** 토큰 검증 */
-  verifyToken: (token: string) => Promise<VerifyTokenResponse>;
   /** 로딩 상태 */
   isLoading: boolean;
 }

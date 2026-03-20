@@ -1,403 +1,310 @@
 /**
- * SyncDashboardPage - 문서 모니터링 화면
- * sync-query API 기반 (/v1/admin/sync-query/*)
+ * SyncDashboardPage - 문서 동기화 모니터링
+ * API: /v1/admin/sync-query (summary, list, uploaders)
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { syncQueryApi } from '../api/syncQueryApi';
 import type {
   SyncDisplayStatus,
   SyncQuerySummaryResponse,
-  SyncQueryEventItem,
   SyncQueryEventListResponse,
   SyncQueryUploader,
 } from '../types/sync-query.types';
 
-// ─── 상수 ───
+/* ─── 상수 ─── */
 
-const STATUS_CONFIG: Record<SyncDisplayStatus, { color: string; bg: string; dot: string }> = {
-  '정상': { color: 'text-green-700', bg: 'bg-green-50', dot: 'bg-green-400' },
-  '동기화 중': { color: 'text-blue-700', bg: 'bg-blue-50', dot: 'bg-blue-400' },
-  '오류': { color: 'text-red-700', bg: 'bg-red-50', dot: 'bg-red-500' },
-  '대기': { color: 'text-gray-700', bg: 'bg-gray-100', dot: 'bg-gray-400' },
+const STATUS_STYLES: Record<SyncDisplayStatus, { badge: string; dot: string }> = {
+  정상: { badge: 'bg-green-50 text-green-700', dot: 'bg-green-400' },
+  '동기화 중': { badge: 'bg-blue-50 text-blue-700', dot: 'bg-blue-400' },
+  오류: { badge: 'bg-red-50 text-red-700', dot: 'bg-red-500' },
+  대기: { badge: 'bg-gray-100 text-gray-600', dot: 'bg-gray-400' },
 };
 
-const DISPLAY_STATUSES: (SyncDisplayStatus | '전체')[] = ['전체', '정상', '동기화 중', '오류', '대기'];
+const ALL_STATUSES: (SyncDisplayStatus | '전체')[] = ['전체', '정상', '동기화 중', '오류', '대기'];
 
-const PERIOD_OPTIONS = [
-  { value: '1', label: '1일' },
-  { value: '7', label: '7일' },
-  { value: '30', label: '30일' },
+const PERIODS = [
+  { value: 1, label: '오늘' },
+  { value: 7, label: '7일' },
+  { value: 30, label: '30일' },
 ];
 
-// ─── 유틸 ───
+/* ─── 유틸 ─── */
 
-function formatFileSize(bytes: number | null): string {
-  if (bytes === null || bytes === undefined) return '-';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('ko-KR', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  });
-}
-
-function formatRelativeTime(iso: string): string {
-  const diff = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
-  if (diff < 60) return '방금 전';
-  if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
-  return `${Math.floor(diff / 86400)}일 전`;
-}
-
-function getDateRange(days: number): { fromDate: string; toDate: string } {
-  const now = new Date();
-  const from = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
+function dateRange(days: number) {
+  const to = new Date();
+  const from = new Date(to.getTime() - days * 86_400_000);
   return {
     fromDate: from.toISOString().slice(0, 10),
-    toDate: now.toISOString().slice(0, 10),
+    toDate: to.toISOString().slice(0, 10),
   };
 }
 
-// ─── 상태 배지 ───
+function fmtSize(b: number | null) {
+  if (b == null) return '-';
+  if (b < 1024) return `${b} B`;
+  if (b < 1_048_576) return `${(b / 1024).toFixed(1)} KB`;
+  return `${(b / 1_048_576).toFixed(1)} MB`;
+}
 
-function StatusBadge({ status }: { status: string }) {
-  const config = STATUS_CONFIG[status as SyncDisplayStatus];
-  if (!config) return <span className="text-xs text-gray-500">{status}</span>;
+function fmtDate(iso: string) {
+  return new Date(iso).toLocaleDateString('ko-KR', {
+    year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+}
+
+function fmtAgo(iso: string) {
+  const s = Math.floor((Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return '방금 전';
+  if (s < 3600) return `${Math.floor(s / 60)}분 전`;
+  if (s < 86400) return `${Math.floor(s / 3600)}시간 전`;
+  return `${Math.floor(s / 86400)}일 전`;
+}
+
+/* ─── 상태 뱃지 ─── */
+
+function Badge({ status }: { status: string }) {
+  const s = STATUS_STYLES[status as SyncDisplayStatus];
+  if (!s) return <span className="text-xs text-gray-500">{status}</span>;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium ${config.bg} ${config.color}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${config.dot}`} />
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${s.badge}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {status}
     </span>
   );
 }
 
-// ─── 메인 컴포넌트 ───
+/* ─── 메인 ─── */
 
 export function SyncDashboardPage() {
-  // 상태
+  /* state */
   const [summary, setSummary] = useState<SyncQuerySummaryResponse | null>(null);
-  const [listData, setListData] = useState<SyncQueryEventListResponse | null>(null);
+  const [list, setList] = useState<SyncQueryEventListResponse | null>(null);
   const [uploaders, setUploaders] = useState<SyncQueryUploader[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
-  // 필터
-  const [statusFilter, setStatusFilter] = useState<SyncDisplayStatus | '전체'>('전체');
-  const [searchFileName, setSearchFileName] = useState('');
-  const [selectedUploader, setSelectedUploader] = useState('');
-  const [periodDays, setPeriodDays] = useState('1');
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
 
-  // 페이지네이션
+  const [period, setPeriod] = useState(1);
+  const [status, setStatus] = useState<SyncDisplayStatus | '전체'>('전체');
+  const [fileName, setFileName] = useState('');
+  const [uploader, setUploader] = useState('');
   const [page, setPage] = useState(1);
-  const [pageSize] = useState(20);
-
-  // 자동 갱신
   const [autoRefresh, setAutoRefresh] = useState(true);
 
-  // ─── 데이터 로드 ───
+  const range = useMemo(() => dateRange(period), [period]);
 
-  const dateRange = getDateRange(Number(periodDays));
-
-  const loadSummary = useCallback(async () => {
-    try {
-      const data = await syncQueryApi.getSummary(dateRange);
-      setSummary(data);
-    } catch (err) {
-      console.error('Summary load failed:', err);
-    }
-  }, [dateRange.fromDate, dateRange.toDate]);
-
-  const loadList = useCallback(async () => {
+  /* data loaders */
+  const loadAll = useCallback(async () => {
     setLoading(true);
-    setError(null);
+    setError('');
     try {
-      const params: Record<string, unknown> = {
-        ...dateRange,
-        page,
-        pageSize,
-      };
-      if (statusFilter !== '전체') params.status = statusFilter;
-      if (searchFileName.trim()) params.fileName = searchFileName.trim();
+      const params: Record<string, unknown> = { ...range, page, pageSize: 20 };
+      if (status !== '전체') params.status = status;
+      if (fileName.trim()) params.fileName = fileName.trim();
 
-      const data = await syncQueryApi.getList(params as any);
-      setListData(data);
+      const [summaryRes, listRes, uploadersRes] = await Promise.all([
+        syncQueryApi.getSummary(range).catch(() => null),
+        syncQueryApi.getList(params as any),
+        syncQueryApi.getUploaders(range).catch(() => ({ uploaders: [] })),
+      ]);
+
+      if (summaryRes) setSummary(summaryRes);
+      setList(listRes);
+      setUploaders(uploadersRes.uploaders);
     } catch (err) {
-      setError(err instanceof Error ? err.message : '목록 조회 실패');
+      setError(err instanceof Error ? err.message : '데이터 조회에 실패했습니다.');
     } finally {
       setLoading(false);
     }
-  }, [dateRange.fromDate, dateRange.toDate, statusFilter, searchFileName, page, pageSize]);
+  }, [range, status, fileName, page]);
 
-  const loadUploaders = useCallback(async () => {
-    try {
-      const data = await syncQueryApi.getUploaders(dateRange);
-      setUploaders(data.uploaders);
-    } catch (err) {
-      console.error('Uploaders load failed:', err);
-    }
-  }, [dateRange.fromDate, dateRange.toDate]);
+  useEffect(() => { loadAll(); }, [loadAll]);
 
-  // 초기 로드
-  useEffect(() => {
-    loadSummary();
-    loadList();
-    loadUploaders();
-  }, [loadSummary, loadList, loadUploaders]);
-
-  // 자동 갱신 (10초)
   useEffect(() => {
     if (!autoRefresh) return;
-    const interval = setInterval(() => {
-      loadSummary();
-      loadList();
-    }, 10000);
-    return () => clearInterval(interval);
-  }, [autoRefresh, loadSummary, loadList]);
+    const id = setInterval(loadAll, 10_000);
+    return () => clearInterval(id);
+  }, [autoRefresh, loadAll]);
 
-  // 필터 변경 시 페이지 리셋
-  const handleStatusFilter = (s: SyncDisplayStatus | '전체') => {
-    setStatusFilter(s);
-    setPage(1);
-  };
+  /* derived */
+  const items = useMemo(() => {
+    const all = list?.items ?? [];
+    if (!uploader) return all;
+    return all.filter((i) => i.uploaderName === uploader);
+  }, [list, uploader]);
 
-  const handleSearch = () => {
-    setPage(1);
-    loadList();
-  };
+  const totalPages = list?.totalPages ?? 1;
 
-  const handleRefresh = () => {
-    loadSummary();
-    loadList();
-    loadUploaders();
-  };
+  /* handlers */
+  const onStatusClick = (s: typeof status) => { setStatus(s); setPage(1); };
+  const onSearch = () => { setPage(1); loadAll(); };
 
-  // 업로더 필터링 (클라이언트 사이드)
-  const filteredItems = listData?.items.filter((item) => {
-    if (!selectedUploader) return true;
-    return item.uploaderName === selectedUploader;
-  }) ?? [];
-
-  // ─── 렌더링 ───
-
+  /* ─── render ─── */
   return (
-    <div className="flex gap-0 h-full -m-6">
-      {/* 좌측 사이드바 */}
-      <div className="w-52 bg-white border-r border-gray-200 flex flex-col shrink-0">
-        {/* 기간 선택 */}
-        <div className="p-4 border-b border-gray-100">
-          <select
-            value={periodDays}
-            onChange={(e) => { setPeriodDays(e.target.value); setPage(1); }}
-            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+    <div className="space-y-4">
+      {/* 헤더 */}
+      <div className="flex items-center justify-between">
+        <h1 className="text-lg font-bold text-gray-900">문서 동기화 모니터링</h1>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={loadAll}
+            className="px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-600 hover:bg-gray-50"
           >
-            {PERIOD_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
-            ))}
-          </select>
-        </div>
-
-        {/* 상태 필터 */}
-        <div className="p-3 border-b border-gray-100">
-          <h3 className="text-xs font-semibold text-gray-500 mb-2">상태</h3>
-          <nav className="space-y-0.5">
-            {DISPLAY_STATUSES.map((s) => {
-              const count = s === '전체'
-                ? (summary?.total ?? 0)
-                : (summary?.counts[s] ?? 0);
-              const isActive = statusFilter === s;
-              return (
-                <button
-                  key={s}
-                  onClick={() => handleStatusFilter(s)}
-                  className={`w-full flex items-center justify-between px-2.5 py-1.5 text-sm rounded transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-blue-700 font-medium'
-                      : 'text-gray-600 hover:bg-gray-50'
-                  }`}
-                >
-                  <span>{s}</span>
-                  <span className={`min-w-[24px] h-5 flex items-center justify-center rounded-full text-xs font-medium px-1.5 ${
-                    isActive ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-500'
-                  }`}>
-                    {count}
-                  </span>
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        {/* 업로더 필터 */}
-        <div className="p-3">
-          <h3 className="text-xs font-semibold text-gray-500 mb-2">업로더</h3>
-          <select
-            value={selectedUploader}
-            onChange={(e) => setSelectedUploader(e.target.value)}
-            className="w-full px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+            새로고침
+          </button>
+          <button
+            onClick={() => setAutoRefresh(!autoRefresh)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
+              autoRefresh
+                ? 'bg-blue-50 border-blue-200 text-blue-700'
+                : 'border-gray-200 text-gray-500 hover:bg-gray-50'
+            }`}
           >
-            <option value="">전체</option>
-            {uploaders.map((u) => (
-              <option key={u.userId} value={u.name}>{u.name}</option>
-            ))}
-          </select>
+            자동 갱신
+            <span className={`inline-block w-7 h-3.5 rounded-full relative ${autoRefresh ? 'bg-blue-500' : 'bg-gray-300'}`}>
+              <span className={`absolute w-2.5 h-2.5 rounded-full bg-white top-0.5 transition-all ${autoRefresh ? 'left-3.5' : 'left-0.5'}`} />
+            </span>
+          </button>
         </div>
       </div>
 
-      {/* 메인 콘텐츠 */}
-      <div className="flex-1 flex flex-col min-w-0 bg-white">
-        {/* 상단 툴바 */}
-        <div className="px-6 py-4 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            {/* 필터 표시 */}
-            <button className="px-3 py-1.5 text-xs rounded border border-gray-200 text-gray-600">
-              필터
-            </button>
-
-            {/* 파일명 검색 */}
-            <div className="relative flex-1 max-w-md">
-              <input
-                type="text"
-                placeholder="파일명 검색..."
-                value={searchFileName}
-                onChange={(e) => setSearchFileName(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
-                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400 text-xs">🔍</span>
-            </div>
-
-            <div className="flex-1" />
-
-            {/* 새로고침 */}
+      {/* 요약 카드 */}
+      <div className="grid grid-cols-5 gap-3">
+        {ALL_STATUSES.map((s) => {
+          const cnt = s === '전체' ? (summary?.total ?? 0) : (summary?.counts[s] ?? 0);
+          const active = status === s;
+          return (
             <button
-              onClick={handleRefresh}
-              className="p-1.5 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded transition-colors"
-              title="새로고침"
-            >
-              🔄
-            </button>
-
-            {/* 자동 갱신 토글 */}
-            <button
-              onClick={() => setAutoRefresh(!autoRefresh)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border transition-colors ${
-                autoRefresh
-                  ? 'bg-blue-50 border-blue-200 text-blue-700'
-                  : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+              key={s}
+              onClick={() => onStatusClick(s)}
+              className={`rounded-lg border p-3 text-left transition-colors ${
+                active ? 'border-blue-300 bg-blue-50 ring-1 ring-blue-200' : 'border-gray-200 bg-white hover:bg-gray-50'
               }`}
             >
-              자동 갱신(10초)
-              <span className={`w-8 h-4 rounded-full relative transition-colors ${autoRefresh ? 'bg-blue-500' : 'bg-gray-300'}`}>
-                <span className={`absolute w-3 h-3 rounded-full bg-white top-0.5 transition-all ${autoRefresh ? 'left-4' : 'left-0.5'}`} />
-              </span>
+              <div className="text-xs text-gray-500 mb-1">{s}</div>
+              <div className={`text-xl font-bold ${active ? 'text-blue-700' : 'text-gray-900'}`}>
+                {cnt.toLocaleString()}
+              </div>
             </button>
-          </div>
+          );
+        })}
+      </div>
+
+      {/* 필터 바 */}
+      <div className="flex items-center gap-3 bg-white rounded-lg border border-gray-200 px-4 py-3">
+        {/* 기간 */}
+        <select
+          value={period}
+          onChange={(e) => { setPeriod(Number(e.target.value)); setPage(1); }}
+          className="px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+        >
+          {PERIODS.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
+        </select>
+
+        {/* 업로더 */}
+        <select
+          value={uploader}
+          onChange={(e) => setUploader(e.target.value)}
+          className="px-2.5 py-1.5 text-sm border border-gray-200 rounded-lg bg-white"
+        >
+          <option value="">업로더 전체</option>
+          {uploaders.map((u) => <option key={u.userId} value={u.name}>{u.name}</option>)}
+        </select>
+
+        {/* 파일명 검색 */}
+        <div className="flex-1 max-w-sm">
+          <input
+            type="text"
+            placeholder="파일명 검색..."
+            value={fileName}
+            onChange={(e) => setFileName(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && onSearch()}
+            className="w-full px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
         </div>
+        <button onClick={onSearch} className="px-3 py-1.5 text-xs rounded bg-blue-500 text-white hover:bg-blue-600">
+          검색
+        </button>
+      </div>
 
-        {/* 에러 */}
-        {error && (
-          <div className="mx-6 mt-4 p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-            {error}
-            <button onClick={handleRefresh} className="ml-2 text-red-600 font-medium">재시도</button>
-          </div>
-        )}
+      {/* 에러 */}
+      {error && (
+        <div className="p-3 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700 flex items-center justify-between">
+          {error}
+          <button onClick={loadAll} className="text-red-600 font-medium text-xs">재시도</button>
+        </div>
+      )}
 
-        {/* 테이블 */}
-        <div className="flex-1 overflow-auto">
-          <table className="w-full">
-            <thead className="bg-gray-50 sticky top-0 z-10">
+      {/* 테이블 */}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">상태</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">파일명</th>
+              <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 w-20">크기</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-20">업로더</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-28">업로드일</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">경과</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">비고</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {loading && !list ? (
               <tr>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">상태</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">파일명</th>
-                <th className="px-4 py-3 text-right text-xs font-semibold text-gray-500 w-20">크기</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-20">업로더</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-28 cursor-pointer">
-                  업로드일 ↓
-                </th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500 w-24">마지막 동기화</th>
-                <th className="px-4 py-3 text-left text-xs font-semibold text-gray-500">비고</th>
+                <td colSpan={7} className="px-4 py-16 text-center">
+                  <div className="w-7 h-7 mx-auto border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  <div className="mt-2 text-sm text-gray-400">불러오는 중...</div>
+                </td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {loading && !listData ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                      <span className="text-sm text-gray-500">불러오는 중...</span>
-                    </div>
+            ) : items.length === 0 ? (
+              <tr>
+                <td colSpan={7} className="px-4 py-16 text-center text-gray-400 text-sm">
+                  동기화 이벤트가 없습니다.
+                </td>
+              </tr>
+            ) : (
+              items.map((it) => (
+                <tr key={it.id} className="hover:bg-gray-50">
+                  <td className="px-4 py-2.5"><Badge status={it.displayStatus} /></td>
+                  <td className="px-4 py-2.5">
+                    <div className="text-sm font-medium text-gray-900 truncate max-w-[300px]">{it.fileName}</div>
+                    <div className="text-xs text-gray-400 truncate max-w-[300px]">{it.folderPath}</div>
+                  </td>
+                  <td className="px-4 py-2.5 text-right text-sm text-gray-600">{fmtSize(it.fileSize)}</td>
+                  <td className="px-4 py-2.5 text-sm text-gray-700">{it.uploaderName}</td>
+                  <td className="px-4 py-2.5 text-sm text-gray-600">{fmtDate(it.uploadedAt)}</td>
+                  <td className="px-4 py-2.5 text-sm text-gray-500">{fmtAgo(it.uploadedAt)}</td>
+                  <td className="px-4 py-2.5">
+                    {it.remarks
+                      ? <span className="text-xs text-red-600" title={it.remarks}>{it.remarks}</span>
+                      : <span className="text-xs text-gray-300">-</span>}
                   </td>
                 </tr>
-              ) : filteredItems.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-4 py-16 text-center text-gray-400 text-sm">
-                    동기화 이벤트가 없습니다.
-                  </td>
-                </tr>
-              ) : (
-                filteredItems.map((item) => (
-                  <tr key={item.id} className="hover:bg-gray-50 transition-colors">
-                    <td className="px-4 py-3">
-                      <StatusBadge status={item.displayStatus} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-col">
-                        <span className="text-sm font-medium text-gray-900 truncate max-w-[280px]">{item.fileName}</span>
-                        <span className="text-xs text-gray-400 truncate max-w-[280px]">{item.folderPath}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-right text-sm text-gray-600">
-                      {formatFileSize(item.fileSize)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {item.uploaderName}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-600">
-                      {formatDate(item.uploadedAt)}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">
-                      {formatRelativeTime(item.uploadedAt)}
-                    </td>
-                    <td className="px-4 py-3">
-                      {item.remarks ? (
-                        <span className="text-xs text-red-600" title={item.remarks}>
-                          {item.remarks}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-gray-300">-</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
 
         {/* 페이지네이션 */}
-        {listData && listData.totalPages > 1 && (
-          <div className="px-6 py-3 border-t border-gray-200 flex items-center justify-between bg-white">
-            <span className="text-sm text-gray-500">
-              전체 {listData.total.toLocaleString()}건 표시 완료
+        {totalPages > 1 && (
+          <div className="px-4 py-3 border-t border-gray-100 flex items-center justify-between">
+            <span className="text-xs text-gray-500">
+              {list?.totalItems?.toLocaleString() ?? 0}건 중 {page} / {totalPages} 페이지
             </span>
-            <div className="flex items-center gap-1">
+            <div className="flex gap-1">
               <button
-                onClick={() => setPage(page - 1)}
                 disabled={page <= 1}
-                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+                onClick={() => setPage(page - 1)}
+                className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
               >
-                «
+                이전
               </button>
-              {Array.from({ length: Math.min(listData.totalPages, 7) }, (_, i) => i + 1).map((p) => (
+              {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => i + 1).map((p) => (
                 <button
                   key={p}
                   onClick={() => setPage(p)}
-                  className={`px-2.5 py-1.5 text-xs rounded border transition-colors ${
+                  className={`px-2 py-1 text-xs rounded border ${
                     p === page ? 'bg-blue-500 text-white border-blue-500' : 'border-gray-200 hover:bg-gray-50'
                   }`}
                 >
@@ -405,11 +312,11 @@ export function SyncDashboardPage() {
                 </button>
               ))}
               <button
+                disabled={page >= totalPages}
                 onClick={() => setPage(page + 1)}
-                disabled={page >= listData.totalPages}
-                className="px-2.5 py-1.5 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
+                className="px-2 py-1 text-xs rounded border border-gray-200 hover:bg-gray-50 disabled:opacity-40"
               >
-                »
+                다음
               </button>
             </div>
           </div>

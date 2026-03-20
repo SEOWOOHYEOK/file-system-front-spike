@@ -88,7 +88,7 @@ export function useInternalAuth() {
       user: compatAuth.user!,
       ssoToken: {
         accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
+        refreshToken: compatAuth.ssoToken?.refreshToken || '',
       },
     };
   };

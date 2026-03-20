@@ -58,6 +58,7 @@ export interface UserWithEmployee {
   id: string;
   isActive: boolean;
   roleId: string | null;
+  roleName: string | null;
   employee: EmployeeInfo | null;
   createdAt: string;
   updatedAt: string;

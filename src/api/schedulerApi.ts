@@ -30,4 +30,16 @@ export const schedulerApi = {
     apiClient.post<{ message: string }>(
       `/admin/scheduler/jobs/${encodeURIComponent(jobName)}/trigger`,
     ),
+
+  /** 잡 일시정지 */
+  pauseJob: (jobName: string) =>
+    apiClient.post<{ message: string }>(
+      `/admin/scheduler/jobs/${encodeURIComponent(jobName)}/pause`,
+    ),
+
+  /** 잡 재개 */
+  resumeJob: (jobName: string) =>
+    apiClient.post<{ message: string }>(
+      `/admin/scheduler/jobs/${encodeURIComponent(jobName)}/resume`,
+    ),
 };

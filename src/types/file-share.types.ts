@@ -450,20 +450,52 @@ export interface RevokeShareResponse {
 
 // ─── 710. 응답 타입 ───
 
+/** 파일 정보 (목록 아이템 내 포함) */
+export interface MyShareFileInfo {
+  /** 파일 ID (UUID) */
+  id: string;
+  /** 파일명 */
+  name: string;
+  /** 파일 크기 (bytes) */
+  sizeBytes: number;
+  /** MIME 타입 */
+  mimeType: string;
+}
+
+/** 공유자 정보 (목록 아이템 내 포함) */
+export interface MyShareUserInfo {
+  /** 사용자 ID (UUID) */
+  userId: string;
+  /** 이름 */
+  name: string;
+  /** 부서 */
+  department: string | null;
+}
+
 /** 나에게 공유된 파일 목록 아이템 */
 export interface MyShareListItem {
   /** 공유 ID (UUID) */
   id: string;
-  /** 파일 ID (UUID) */
-  fileId: string;
-  /** 파일명 */
-  fileName: string;
   /** 권한 목록 */
   permissions: string[];
+  /** 상태 (ACTIVE / EXPIRED) */
+  status: string;
   /** 만료일시 (ISO 8601) */
-  expiresAt?: string;
+  expiresAt: string | null;
   /** 생성일시 (ISO 8601) */
   createdAt: string;
+  /** 최대 뷰 횟수 */
+  maxViewCount: number | null;
+  /** 현재 뷰 횟수 */
+  currentViewCount: number;
+  /** 최대 다운로드 횟수 */
+  maxDownloadCount: number | null;
+  /** 현재 다운로드 횟수 */
+  currentDownloadCount: number;
+  /** 파일 정보 */
+  fileInfo: MyShareFileInfo | null;
+  /** 공유자 정보 */
+  userInfo: MyShareUserInfo;
 }
 
 /** 공유 상세 정보 (710 전용) */

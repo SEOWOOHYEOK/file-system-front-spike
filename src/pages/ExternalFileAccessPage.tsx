@@ -1,18 +1,26 @@
 /**
- * ExternalFileAccessPage - 나에게 공유된 파일 접근 (710)
- * 내부 사용자가 외부 공유로 받은 파일 목록 확인, 상세 조회, 보기/다운로드
+ * ExternalFileAccessPage - 710. 외부 문서함
+ * 나에게 공유된 파일 목록 확인, 상세 조회, 보기/다운로드
  */
 import { useState, useCallback, useEffect } from 'react';
 import { externalFileAccessApi } from '../api/externalFileAccessApi';
 import { FileViewer } from '../components/FileViewer';
-import type { MyShareListItem, ShareDetailResponse, ShareDetail } from '../types/file-share.types';
+import type { MyShareListItem, ShareDetailResponse } from '../types/file-share.types';
 import axios from 'axios';
 
 const TOKEN_EXPIRED_ERROR_CODES = [2112, 2113];
 
 // ─── 유틸 ───
 
-function formatExpiryDate(isoDate?: string): string {
+/** permissions가 쉼표 구분 문자열로 올 수 있으므로 항상 배열로 변환 */
+function toPermissionsArray(permissions: string[] | string | undefined | null): string[] {
+  if (!permissions) return [];
+  if (Array.isArray(permissions)) return permissions;
+  if (typeof permissions === 'string') return permissions.split(',').map((s) => s.trim()).filter(Boolean);
+  return [];
+}
+
+function formatExpiryDate(isoDate?: string | null): string {
   if (!isoDate) return '무기한';
   try {
     const d = new Date(isoDate);
@@ -26,12 +34,13 @@ function formatExpiryDate(isoDate?: string): string {
   }
 }
 
-function formatFileSize(bytes?: number): string {
-  if (bytes == null || bytes === 0) return '-';
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
+function formatFileSize(bytes?: number | string | null): string {
+  const n = typeof bytes === 'string' ? Number(bytes) : bytes;
+  if (n == null || n === 0 || isNaN(n)) return '-';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  return `${(n / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 function formatDate(isoDate: string): string {
@@ -48,14 +57,10 @@ function formatDate(isoDate: string): string {
   }
 }
 
-/** 미리보기 가능한 파일인지 판별 */
 function isPreviewableFile(mimeType?: string, fileName?: string): boolean {
   if (!mimeType && !fileName) return false;
-  // PDF
   if (mimeType === 'application/pdf' || fileName?.toLowerCase().endsWith('.pdf')) return true;
-  // 이미지
   if (mimeType?.startsWith('image/') || /\.(jpg|jpeg|png|gif|webp|svg)$/i.test(fileName ?? '')) return true;
-  // 텍스트 계열
   if (mimeType?.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/javascript') return true;
   const textExtensions = [
     '.txt', '.md', '.json', '.js', '.ts', '.tsx', '.jsx', '.css', '.html',
@@ -65,17 +70,36 @@ function isPreviewableFile(mimeType?: string, fileName?: string): boolean {
   return false;
 }
 
-/** 공유가 사용 불가 상태인지 (만료 또는 다운로드 횟수 소진) */
-function isShareBlocked(share: MyShareListItem, cached?: ShareDetail): { blocked: boolean; reason: string } {
-  // 만료 체크
+function isShareBlocked(share: MyShareListItem): { blocked: boolean; reason: string } {
+  if (share.status === 'EXPIRED') {
+    return { blocked: true, reason: '공유 기간이 만료되었습니다.' };
+  }
   if (share.expiresAt && new Date(share.expiresAt) < new Date()) {
     return { blocked: true, reason: '공유 기간이 만료되었습니다.' };
   }
-  // 다운로드 횟수 소진 체크
-  if (cached && cached.maxDownloadCount != null && cached.currentDownloadCount >= cached.maxDownloadCount) {
+  if (share.maxDownloadCount != null && share.currentDownloadCount >= share.maxDownloadCount) {
     return { blocked: true, reason: '다운로드 횟수가 모두 소진되었습니다.' };
   }
   return { blocked: false, reason: '' };
+}
+
+function getFileName(share: MyShareListItem): string {
+  return share.fileInfo?.name ?? 'unknown';
+}
+
+// ─── 상태 배지 ───
+
+function StatusBadge({ status }: { status: string }) {
+  const isActive = status === 'ACTIVE';
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded ${
+        isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-gray-100 text-gray-600'
+      }`}
+    >
+      {isActive ? '활성' : '만료'}
+    </span>
+  );
 }
 
 // ─── 상세 모달 ───
@@ -103,7 +127,6 @@ function FileDetailModal({
   const [viewerFileUrl, setViewerFileUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  // 콘텐츠 토큰 만료 시 재발급 후 재시도
   const fetchContentWithRetry = useCallback(
     async (retryCount = 0): Promise<Blob> => {
       if (!share || !detail) throw new Error('Missing share info');
@@ -210,15 +233,18 @@ function FileDetailModal({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
+  if (!isOpen || !share) return null;
 
-  const s: ShareDetail | MyShareListItem | null = detail?.share ?? share;
-  const fileName = s?.fileName ?? 'unknown';
-  const hasView = s?.permissions?.includes('VIEW') ?? false;
-  const hasDownload = s?.permissions?.includes('DOWNLOAD') ?? false;
-  const mimeType = 'mimeType' in (s ?? {}) ? (s as ShareDetail).mimeType : undefined;
+  // 상세 조회 결과가 있으면 사용, 없으면 목록 아이템 기반으로 표시
+  const detailShare = detail?.share;
+  const fileName = detailShare?.fileName ?? getFileName(share);
+  const fileSize = detailShare?.fileSize ?? share.fileInfo?.sizeBytes;
+  const mimeType = detailShare?.mimeType ?? share.fileInfo?.mimeType;
+  const permissions = toPermissionsArray(detailShare?.permissions ?? share.permissions);
+  const hasView = permissions.includes('VIEW');
+  const hasDownload = permissions.includes('DOWNLOAD');
   const canPreview = isPreviewableFile(mimeType, fileName);
-  const blockInfo = share ? isShareBlocked(share, detail?.share) : { blocked: false, reason: '' };
+  const blockInfo = isShareBlocked(share);
 
   return (
     <>
@@ -243,7 +269,7 @@ function FileDetailModal({
               <div className="flex justify-center py-8">
                 <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
               </div>
-            ) : s ? (
+            ) : (
               <>
                 {/* 파일명 */}
                 <div>
@@ -252,61 +278,82 @@ function FileDetailModal({
                 </div>
 
                 {/* 크기, MIME */}
-                {'fileSize' in s && (
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-sm text-gray-500">크기</div>
-                      <div className="font-medium">{formatFileSize((s as ShareDetail).fileSize)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">유형</div>
-                      <div className="font-medium truncate">{(s as ShareDetail).mimeType || '-'}</div>
-                    </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <div className="text-sm text-gray-500">크기</div>
+                    <div className="font-medium">{formatFileSize(fileSize)}</div>
                   </div>
-                )}
-
-                {/* 권한 */}
-                <div>
-                  <div className="text-sm text-gray-500">권한</div>
-                  <div className="flex gap-2 mt-1">
-                    {s.permissions?.map((p) => (
-                      <span
-                        key={p}
-                        className={`px-2 py-0.5 text-xs font-medium rounded ${
-                          p === 'VIEW'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-green-100 text-green-800'
-                        }`}
-                      >
-                        {p === 'VIEW' ? '보기' : '다운로드'}
-                      </span>
-                    ))}
+                  <div>
+                    <div className="text-sm text-gray-500">유형</div>
+                    <div className="font-medium truncate">{mimeType || '-'}</div>
                   </div>
                 </div>
 
-                {/* 다운로드 횟수 */}
-                {'currentDownloadCount' in s && (
+                {/* 공유자 */}
+                <div>
+                  <div className="text-sm text-gray-500">공유자</div>
+                  <div className="font-medium">
+                    {share.userInfo.name}
+                    {share.userInfo.department && (
+                      <span className="text-gray-500 ml-1 text-sm">({share.userInfo.department})</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* 권한 + 상태 */}
+                <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <div className="text-sm text-gray-500">다운로드 현황</div>
-                    <div className="text-sm mt-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-gray-600">다운로드:</span>
-                        <span className="font-medium">
-                          {(s as ShareDetail).currentDownloadCount ?? 0}
-                          {(s as ShareDetail).maxDownloadCount != null
-                            ? ` / ${(s as ShareDetail).maxDownloadCount}`
-                            : ''}
-                          회
+                    <div className="text-sm text-gray-500">권한</div>
+                    <div className="flex gap-2 mt-1">
+                      {permissions.map((p) => (
+                        <span
+                          key={p}
+                          className={`px-2 py-0.5 text-xs font-medium rounded ${
+                            p === 'VIEW'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-green-100 text-green-800'
+                          }`}
+                        >
+                          {p === 'VIEW' ? '보기' : '다운로드'}
                         </span>
-                      </div>
+                      ))}
                     </div>
                   </div>
-                )}
+                  <div>
+                    <div className="text-sm text-gray-500">상태</div>
+                    <div className="mt-1">
+                      <StatusBadge status={share.status} />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 다운로드 현황 */}
+                <div>
+                  <div className="text-sm text-gray-500">조회/다운로드 현황</div>
+                  <div className="text-sm mt-1 flex gap-4">
+                    <span>
+                      조회: <span className="font-medium">{detailShare?.currentViewCount ?? share.currentViewCount}</span>
+                      {(detailShare?.maxViewCount ?? share.maxViewCount) != null && (
+                        <span className="text-gray-400">/{detailShare?.maxViewCount ?? share.maxViewCount}</span>
+                      )}
+                      회
+                    </span>
+                    <span>
+                      다운로드: <span className="font-medium">{detailShare?.currentDownloadCount ?? share.currentDownloadCount}</span>
+                      {(detailShare?.maxDownloadCount ?? share.maxDownloadCount) != null && (
+                        <span className="text-gray-400">/{detailShare?.maxDownloadCount ?? share.maxDownloadCount}</span>
+                      )}
+                      회
+                    </span>
+                  </div>
+                </div>
 
                 {/* 만료일 */}
                 <div>
                   <div className="text-sm text-gray-500">만료일</div>
-                  <div className="font-medium">{formatExpiryDate(s.expiresAt)}</div>
+                  <div className="font-medium">
+                    {formatExpiryDate(detailShare?.expiresAt ?? share.expiresAt)}
+                  </div>
                 </div>
 
                 {/* 에러 */}
@@ -348,7 +395,7 @@ function FileDetailModal({
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728L5.636 5.636m12.728 12.728A9 9 0 015.636 5.636" />
                         </svg>
-                        해당 파일형식은 미리보기가 불가합니다
+                        미리보기 불가
                       </div>
                     )
                   )}
@@ -370,8 +417,6 @@ function FileDetailModal({
                   )}
                 </div>
               </>
-            ) : (
-              <div className="py-8 text-center text-gray-500">정보를 불러올 수 없습니다.</div>
             )}
           </div>
         </div>
@@ -383,7 +428,7 @@ function FileDetailModal({
         onClose={handleCloseViewer}
         fileUrl={viewerFileUrl}
         fileName={fileName}
-        mimeType={'mimeType' in (s ?? {}) ? (s as ShareDetail).mimeType : undefined}
+        mimeType={mimeType}
       />
     </>
   );
@@ -396,6 +441,10 @@ export function ExternalFileAccessPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // 검색 & 필터
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'ALL' | 'ACTIVE' | 'EXPIRED'>('ALL');
+
   // 페이지네이션
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -403,6 +452,7 @@ export function ExternalFileAccessPage() {
   const pageSize = 20;
 
   // 정렬
+  const [sortBy, setSortBy] = useState<'createdAt' | 'fileName'>('createdAt');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
   // 상세 모달
@@ -410,16 +460,12 @@ export function ExternalFileAccessPage() {
   const [shareDetail, setShareDetail] = useState<ShareDetailResponse | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
-  // 목록 상세 정보 캐시 (파일크기, 조회/다운로드 횟수 표시용)
-  const [detailsCache, setDetailsCache] = useState<Record<string, ShareDetail>>({});
-  const [loadingDetailsIds, setLoadingDetailsIds] = useState<Set<string>>(new Set());
-
   // 파일 뷰어 (목록에서 바로 미리보기)
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerFileUrl, setViewerFileUrl] = useState<string | null>(null);
   const [viewerFileName, setViewerFileName] = useState('');
   const [viewerMimeType, setViewerMimeType] = useState<string | undefined>();
-  const [viewerLoading, setViewerLoading] = useState<string | null>(null); // shareId being loaded
+  const [viewerLoading, setViewerLoading] = useState<string | null>(null);
 
   // ─── 목록 조회 ───
   const fetchShares = useCallback(async () => {
@@ -429,7 +475,9 @@ export function ExternalFileAccessPage() {
       const res = await externalFileAccessApi.getMyShares({
         page,
         pageSize,
-        sortBy: 'createdAt',
+        search: search.trim() || undefined,
+        status: statusFilter === 'ALL' ? undefined : statusFilter,
+        sortBy,
         sortOrder,
       });
       setShares(res.items);
@@ -449,32 +497,7 @@ export function ExternalFileAccessPage() {
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize, sortOrder]);
-
-  // ─── 목록 아이템 상세 정보 일괄 조회 ───
-  const fetchDetailsForShares = useCallback(async (items: MyShareListItem[]) => {
-    const idsToFetch = items
-      .map((item) => item.id)
-      .filter((id) => !detailsCache[id]);
-    if (idsToFetch.length === 0) return;
-
-    setLoadingDetailsIds(new Set(idsToFetch));
-
-    const results = await Promise.allSettled(
-      idsToFetch.map((id) => externalFileAccessApi.getShareDetail(id)),
-    );
-
-    setDetailsCache((prev) => {
-      const next = { ...prev };
-      results.forEach((result, idx) => {
-        if (result.status === 'fulfilled') {
-          next[idsToFetch[idx]] = result.value.share;
-        }
-      });
-      return next;
-    });
-    setLoadingDetailsIds(new Set());
-  }, [detailsCache]);
+  }, [page, pageSize, search, statusFilter, sortBy, sortOrder]);
 
   // ─── 상세 조회 ───
   const fetchDetail = useCallback(async () => {
@@ -483,8 +506,6 @@ export function ExternalFileAccessPage() {
     try {
       const detail = await externalFileAccessApi.getShareDetail(selectedShare.id);
       setShareDetail(detail);
-      // 캐시 업데이트
-      setDetailsCache((prev) => ({ ...prev, [selectedShare.id]: detail.share }));
     } catch (err) {
       console.error('Failed to fetch detail:', err);
       setShareDetail(null);
@@ -497,13 +518,6 @@ export function ExternalFileAccessPage() {
     fetchShares();
   }, [fetchShares]);
 
-  // 목록 로드 후 상세 정보 일괄 조회
-  useEffect(() => {
-    if (shares.length > 0) {
-      fetchDetailsForShares(shares);
-    }
-  }, [shares]); // eslint-disable-line react-hooks/exhaustive-deps
-
   useEffect(() => {
     if (selectedShare) {
       fetchDetail();
@@ -511,6 +525,16 @@ export function ExternalFileAccessPage() {
       setShareDetail(null);
     }
   }, [selectedShare, fetchDetail]);
+
+  // 검색/필터 변경 시 페이지 리셋
+  const handleSearch = () => {
+    setPage(1);
+  };
+
+  const handleStatusChange = (status: 'ALL' | 'ACTIVE' | 'EXPIRED') => {
+    setStatusFilter(status);
+    setPage(1);
+  };
 
   const handleSelectShare = (share: MyShareListItem) => {
     setSelectedShare(share);
@@ -524,11 +548,9 @@ export function ExternalFileAccessPage() {
   // ─── 목록에서 바로 미리보기 ───
   const handlePreviewFromList = async (e: React.MouseEvent, share: MyShareListItem) => {
     e.stopPropagation();
-    if (!share.permissions?.includes('VIEW')) return;
+    if (!toPermissionsArray(share.permissions).includes('VIEW')) return;
 
-    // 차단 체크 (만료 또는 다운로드 횟수 소진)
-    const cached = detailsCache[share.id];
-    const blockStatus = isShareBlocked(share, cached);
+    const blockStatus = isShareBlocked(share);
     if (blockStatus.blocked) {
       alert(blockStatus.reason);
       return;
@@ -536,22 +558,16 @@ export function ExternalFileAccessPage() {
 
     setViewerLoading(share.id);
     try {
-      // 1. 상세 조회로 contentToken 발급
       const detailRes = await externalFileAccessApi.getShareDetail(share.id);
-      // 캐시 업데이트
-      setDetailsCache((prev) => ({ ...prev, [share.id]: detailRes.share }));
-
-      // 2. 콘텐츠 다운로드
       const blob = await externalFileAccessApi.getContent(share.id, detailRes.contentToken);
       const url = URL.createObjectURL(blob);
 
-      setViewerFileName(share.fileName);
-      setViewerMimeType(detailRes.share.mimeType);
+      setViewerFileName(getFileName(share));
+      setViewerMimeType(share.fileInfo?.mimeType ?? detailRes.share.mimeType);
       setViewerFileUrl(url);
       setViewerOpen(true);
     } catch (err) {
       console.error('Failed to preview file:', err);
-      // 토큰 만료 시 재시도
       if (axios.isAxiosError(err)) {
         const errData = err.response?.data as { errorCode?: number } | undefined;
         if (errData?.errorCode && TOKEN_EXPIRED_ERROR_CODES.includes(errData.errorCode)) {
@@ -559,8 +575,8 @@ export function ExternalFileAccessPage() {
             const newDetail = await externalFileAccessApi.getShareDetail(share.id);
             const blob = await externalFileAccessApi.getContent(share.id, newDetail.contentToken);
             const url = URL.createObjectURL(blob);
-            setViewerFileName(share.fileName);
-            setViewerMimeType(newDetail.share.mimeType);
+            setViewerFileName(getFileName(share));
+            setViewerMimeType(share.fileInfo?.mimeType ?? newDetail.share.mimeType);
             setViewerFileUrl(url);
             setViewerOpen(true);
             return;
@@ -591,25 +607,15 @@ export function ExternalFileAccessPage() {
       <div className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">나에게 공유된 파일</h1>
+            <h1 className="text-xl font-bold text-gray-900">외부 문서함</h1>
             <p className="text-sm text-gray-500 mt-1">
-              외부 공유를 통해 받은 파일 목록입니다.
+              나에게 공유된 파일 목록입니다.
               {totalItems > 0 && (
                 <span className="ml-2 text-blue-600 font-medium">총 {totalItems}건</span>
               )}
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* 정렬 토글 */}
-            <button
-              onClick={() => setSortOrder((prev) => (prev === 'desc' ? 'asc' : 'desc'))}
-              className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-            >
-              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
-              </svg>
-              {sortOrder === 'desc' ? '최신순' : '오래된순'}
-            </button>
             {/* 새로고침 */}
             <button
               onClick={fetchShares}
@@ -623,6 +629,68 @@ export function ExternalFileAccessPage() {
             </button>
           </div>
         </div>
+
+        {/* 검색/필터 바 */}
+        <div className="flex items-center gap-3 mt-4">
+          {/* 검색 */}
+          <div className="flex-1 max-w-md">
+            <div className="relative">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+                placeholder="파일명으로 검색..."
+                className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              <svg className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+            </div>
+          </div>
+
+          {/* 상태 필터 */}
+          <div className="flex items-center bg-gray-100 rounded-lg p-0.5">
+            {(['ALL', 'ACTIVE', 'EXPIRED'] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => handleStatusChange(s)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                  statusFilter === s
+                    ? 'bg-white text-gray-900 shadow-sm'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                {s === 'ALL' ? '전체' : s === 'ACTIVE' ? '활성' : '만료'}
+              </button>
+            ))}
+          </div>
+
+          {/* 정렬 */}
+          <button
+            onClick={() => {
+              if (sortBy === 'createdAt' && sortOrder === 'desc') {
+                setSortOrder('asc');
+              } else if (sortBy === 'createdAt' && sortOrder === 'asc') {
+                setSortBy('fileName');
+                setSortOrder('asc');
+              } else if (sortBy === 'fileName' && sortOrder === 'asc') {
+                setSortOrder('desc');
+              } else {
+                setSortBy('createdAt');
+                setSortOrder('desc');
+              }
+            }}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
+          >
+            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16V4m0 0L3 8m4-4l4 4m6 0v12m0 0l4-4m-4 4l-4-4" />
+            </svg>
+            {sortBy === 'createdAt'
+              ? sortOrder === 'desc' ? '최신순' : '오래된순'
+              : sortOrder === 'asc' ? '파일명 A-Z' : '파일명 Z-A'}
+          </button>
+        </div>
       </div>
 
       {/* Content */}
@@ -633,9 +701,7 @@ export function ExternalFileAccessPage() {
             <svg className="w-5 h-5 text-red-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <div>
-              <p className="text-sm text-red-800">{error}</p>
-            </div>
+            <p className="text-sm text-red-800">{error}</p>
           </div>
         )}
 
@@ -656,7 +722,11 @@ export function ExternalFileAccessPage() {
               </svg>
             </div>
             <h3 className="text-lg font-medium text-gray-900 mb-2">공유된 파일이 없습니다</h3>
-            <p className="text-gray-500">현재 나에게 공유된 파일이 없습니다.</p>
+            <p className="text-gray-500">
+              {search || statusFilter !== 'ALL'
+                ? '검색 조건에 맞는 공유 파일이 없습니다.'
+                : '현재 나에게 공유된 파일이 없습니다.'}
+            </p>
           </div>
         )}
 
@@ -673,10 +743,16 @@ export function ExternalFileAccessPage() {
                     파일크기
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    공유자
+                  </th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     권한
                   </th>
                   <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
                     다운로드
+                  </th>
+                  <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    상태
                   </th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     만료일
@@ -691,21 +767,20 @@ export function ExternalFileAccessPage() {
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
                 {shares.map((share) => {
-                  const isExpired =
-                    share.expiresAt && new Date(share.expiresAt) < new Date();
-                  const cached = detailsCache[share.id];
-                  const isLoadingInfo = loadingDetailsIds.has(share.id);
-                  const hasView = share.permissions?.includes('VIEW');
-                  const blockStatus = isShareBlocked(share, cached);
-                  const previewable = cached ? isPreviewableFile(cached.mimeType, share.fileName) : isPreviewableFile(undefined, share.fileName);
+                  const fileName = getFileName(share);
+                  const blockStatus = isShareBlocked(share);
+                  const perms = toPermissionsArray(share.permissions);
+                  const hasView = perms.includes('VIEW');
+                  const previewable = isPreviewableFile(share.fileInfo?.mimeType, fileName);
                   return (
                     <tr
                       key={share.id}
                       className={`hover:bg-gray-50 transition-colors cursor-pointer ${
-                        isExpired ? 'opacity-60' : ''
+                        share.status === 'EXPIRED' ? 'opacity-60' : ''
                       }`}
                       onClick={() => handleSelectShare(share)}
                     >
+                      {/* 파일명 */}
                       <td className="px-6 py-4">
                         <div className="flex items-center gap-3">
                           <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
@@ -713,26 +788,26 @@ export function ExternalFileAccessPage() {
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
                           </div>
-                          <div>
-                            <div className="text-sm font-medium text-gray-900 truncate max-w-xs">
-                              {share.fileName}
-                            </div>
-                            <div className="text-xs text-gray-500">ID: {share.id.slice(0, 8)}...</div>
+                          <div className="text-sm font-medium text-gray-900 truncate max-w-xs">
+                            {fileName}
                           </div>
                         </div>
                       </td>
                       {/* 파일크기 */}
                       <td className="px-4 py-4 text-sm text-gray-600 whitespace-nowrap">
-                        {isLoadingInfo ? (
-                          <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-                        ) : cached ? (
-                          formatFileSize(cached.fileSize)
-                        ) : '-'}
+                        {formatFileSize(share.fileInfo?.sizeBytes)}
+                      </td>
+                      {/* 공유자 */}
+                      <td className="px-4 py-4">
+                        <div className="text-sm text-gray-900">{share.userInfo.name}</div>
+                        {share.userInfo.department && (
+                          <div className="text-xs text-gray-500">{share.userInfo.department}</div>
+                        )}
                       </td>
                       {/* 권한 */}
                       <td className="px-4 py-4">
                         <div className="flex gap-1.5">
-                          {share.permissions?.map((p) => (
+                          {perms.map((p) => (
                             <span
                               key={p}
                               className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded ${
@@ -748,27 +823,21 @@ export function ExternalFileAccessPage() {
                       </td>
                       {/* 다운로드 수 */}
                       <td className="px-4 py-4 text-center">
-                        {isLoadingInfo ? (
-                          <div className="flex justify-center">
-                            <div className="w-4 h-4 border-2 border-gray-300 border-t-transparent rounded-full animate-spin" />
-                          </div>
-                        ) : cached ? (
-                          <span className="text-sm text-gray-700">
-                            {cached.currentDownloadCount}
-                            {cached.maxDownloadCount != null && (
-                              <span className="text-gray-400">/{cached.maxDownloadCount}</span>
-                            )}
-                          </span>
-                        ) : '-'}
+                        <span className="text-sm text-gray-700">
+                          {share.currentDownloadCount}
+                          {share.maxDownloadCount != null && (
+                            <span className="text-gray-400">/{share.maxDownloadCount}</span>
+                          )}
+                        </span>
+                      </td>
+                      {/* 상태 */}
+                      <td className="px-4 py-4 text-center">
+                        <StatusBadge status={share.status} />
                       </td>
                       {/* 만료일 */}
                       <td className="px-4 py-4">
-                        <span
-                          className={`text-sm ${
-                            isExpired ? 'text-red-500 font-medium' : 'text-gray-600'
-                          }`}
-                        >
-                          {isExpired ? '만료됨' : formatExpiryDate(share.expiresAt)}
+                        <span className={`text-sm ${share.status === 'EXPIRED' ? 'text-red-500 font-medium' : 'text-gray-600'}`}>
+                          {share.status === 'EXPIRED' ? '만료됨' : formatExpiryDate(share.expiresAt)}
                         </span>
                       </td>
                       {/* 공유일시 */}
@@ -778,7 +847,6 @@ export function ExternalFileAccessPage() {
                       {/* 액션 */}
                       <td className="px-4 py-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {/* 미리보기 버튼 */}
                           {hasView && (
                             previewable && !blockStatus.blocked ? (
                               <button
@@ -802,7 +870,7 @@ export function ExternalFileAccessPage() {
                                   e.stopPropagation();
                                   alert(blockStatus.blocked ? blockStatus.reason : '해당 파일형식은 미리보기가 불가합니다.');
                                 }}
-                                title={blockStatus.blocked ? blockStatus.reason : '해당 파일형식은 미리보기가 불가합니다'}
+                                title={blockStatus.blocked ? blockStatus.reason : '미리보기 불가'}
                                 className="inline-flex items-center p-1.5 text-gray-400 bg-gray-50 rounded-lg cursor-not-allowed"
                               >
                                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">

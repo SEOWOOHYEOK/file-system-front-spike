@@ -6,10 +6,10 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   server: {
-    port: 5173,
+    port: 4000,
     proxy: {
       "/v1": {
-        target: "http://localhost:3000",
+        target: "http://localhost:3200",
         changeOrigin: true,
         timeout: 600000, // 프록시 타임아웃 10분 (대용량 파트 업로드)
         configure: (proxy) => {
@@ -33,6 +33,10 @@ export default defineConfig({
             proxyRes.setTimeout(600000); // 10분
           });
         },
+      },
+      "/v2": {
+        target: "http://localhost:3200",
+        changeOrigin: true,
       },
     },
   },

@@ -1,5 +1,5 @@
 /**
- * 710. 파일 외부공유 접근 API Client
+ * 710. 외부 문서함 API Client
  * 나에게 공유된 파일 목록 조회, 상세 조회, 콘텐츠 보기, 다운로드
  * apiClient를 사용하여 내부 인증 토큰 자동 첨부
  */
@@ -15,7 +15,9 @@ import type {
 export interface MyShareListParams {
   page?: number;
   pageSize?: number;
-  sortBy?: string;
+  search?: string;
+  status?: 'ACTIVE' | 'EXPIRED';
+  sortBy?: 'fileName' | 'createdAt';
   sortOrder?: 'asc' | 'desc';
 }
 

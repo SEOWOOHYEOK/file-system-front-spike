@@ -37,10 +37,12 @@ export interface SyncQueryEventItem {
 /** 동기화 이벤트 목록 응답 */
 export interface SyncQueryEventListResponse {
   items: SyncQueryEventItem[];
-  total: number;
+  totalItems: number;
   page: number;
   pageSize: number;
   totalPages: number;
+  hasNext: boolean;
+  hasPrev: boolean;
 }
 
 /** 업로더 아이템 */

@@ -23,9 +23,7 @@ import type {
   AuthContextValue,
   LoginResponse,
   RefreshTokenResponse,
-  VerifyTokenResponse,
   UserInfo,
-  UserType,
 } from '../types/auth.types';
 
 // ─── 초기 상태 ───
@@ -117,13 +115,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const handleTokensRefreshed = (e: Event) => {
-      const { accessToken, refreshToken, expiresIn } = (e as CustomEvent).detail;
+      const { accessToken, expiresIn } = (e as CustomEvent).detail;
       const expiresAt = Date.now() + expiresIn * 1000;
 
       setAuth((prev) => ({
         ...prev,
         accessToken,
-        refreshToken,
         expiresAt,
       }));
     };
@@ -148,13 +145,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await authApi.refreshToken(refreshTokenValue);
       const expiresAt = Date.now() + data.expiresIn * 1000;
 
-      tokenStorage.saveTokens(data.accessToken, data.refreshToken, data.expiresIn);
+      // V2: accessToken만 갱신, refreshToken은 로테이션하지 않음
+      tokenStorage.saveAccessToken(data.accessToken, data.expiresIn);
 
       setAuth((prev) => ({
         ...prev,
         isAuthenticated: true,
         accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
         expiresAt,
       }));
     } catch {
@@ -174,7 +171,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // 토큰 저장
       tokenStorage.saveTokens(data.accessToken, data.refreshToken, data.expiresIn);
-      tokenStorage.saveUser(data.user, data.userType);
+      tokenStorage.saveUser(data.user, 'internal');
 
       // 상태 업데이트
       setAuth({
@@ -182,7 +179,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         accessToken: data.accessToken,
         refreshToken: data.refreshToken,
         user: data.user,
-        userType: data.userType,
+        userType: 'internal',
         expiresAt,
       });
 
@@ -195,17 +192,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // ── 로그아웃 ──
 
   const logout = useCallback(async () => {
-    try {
-      await authApi.logout();
-    } catch {
-      // 서버 로그아웃 실패해도 로컬은 정리
-    } finally {
-      tokenStorage.clearAll();
-      setAuth(initialAuthState);
+    tokenStorage.clearAll();
+    setAuth(initialAuthState);
 
-      if (refreshTimerRef.current) {
-        clearTimeout(refreshTimerRef.current);
-      }
+    if (refreshTimerRef.current) {
+      clearTimeout(refreshTimerRef.current);
     }
   }, []);
 
@@ -222,13 +213,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const data = await authApi.refreshToken(rt);
       const expiresAt = Date.now() + data.expiresIn * 1000;
 
-      tokenStorage.saveTokens(data.accessToken, data.refreshToken, data.expiresIn);
+      // V2: accessToken만 갱신, refreshToken은 로테이션하지 않음
+      tokenStorage.saveAccessToken(data.accessToken, data.expiresIn);
 
       setAuth((prev) => ({
         ...prev,
         isAuthenticated: true,
         accessToken: data.accessToken,
-        refreshToken: data.refreshToken,
         expiresAt,
       }));
 
@@ -242,12 +233,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [auth.refreshToken]);
 
-  // ── 토큰 검증 ──
-
-  const verifyToken = useCallback(async (token: string): Promise<VerifyTokenResponse> => {
-    return authApi.verifyToken(token);
-  }, []);
-
   // ─── Context Value ───
 
   const value: AuthContextValue = {
@@ -255,7 +240,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     login,
     logout,
     refresh,
-    verifyToken,
     isLoading,
   };
 

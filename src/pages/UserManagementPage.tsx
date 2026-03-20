@@ -95,15 +95,10 @@ function getRoleCounts(
   users: UserWithEmployee[],
   roles: Role[]
 ): { name: string; count: number; color: string }[] {
-  const roleIdNameMap = new Map<string, string>();
-  for (const role of roles) {
-    roleIdNameMap.set(role.id, role.name);
-  }
-
   const counts = new Map<string, number>();
   for (const user of users) {
-    const roleName = user.roleId ? (roleIdNameMap.get(user.roleId) || 'Unknown') : 'Guest';
-    counts.set(roleName, (counts.get(roleName) || 0) + 1);
+    const name = user.roleName || 'Guest';
+    counts.set(name, (counts.get(name) || 0) + 1);
   }
 
   const colorMap: Record<string, string> = {
@@ -286,15 +281,6 @@ export function UserManagementPage() {
     setSelectedDepartment((prev) => (prev?.id === dept?.id ? null : dept));
   }, []);
 
-  // ── roleId → roleName 맵 ──
-  const roleIdNameMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const role of roles) {
-      map.set(role.id, role.name);
-    }
-    return map;
-  }, [roles]);
-
   // ── 역할별 카운트 ──
   const roleCounts = useMemo(() => getRoleCounts(users, roles), [users, roles]);
 
@@ -320,7 +306,7 @@ export function UserManagementPage() {
     // 역할 필터
     if (roleFilter !== 'all') {
       if (roleFilter === 'none') {
-        result = result.filter((user) => !user.roleId);
+        result = result.filter((user) => !user.roleName);
       } else {
         result = result.filter((user) => user.roleId === roleFilter);
       }
@@ -689,9 +675,7 @@ export function UserManagementPage() {
                   const { department, position } = getPrimaryDepartment(
                     user.employee?.departmentPositions
                   );
-                  const currentRoleName = user.roleId
-                    ? roleIdNameMap.get(user.roleId) || 'Unknown'
-                    : 'Guest';
+                  const currentRoleName = user.roleName || 'Guest';
 
                   const isManagerRole = currentRoleName === 'Manager';
 

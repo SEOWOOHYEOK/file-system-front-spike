@@ -7,6 +7,7 @@ export interface ScheduledJobSummary {
   jobName: string;
   jobDescription: string;
   jobGroup: string;
+  isPaused: boolean;
 }
 
 export interface BatchExecutionLog {
@@ -23,6 +24,7 @@ export interface BatchExecutionLog {
 export interface DashboardSummary {
   totalJobs: number;
   runningNow: string[];
+  pausedJobs: string[];
   last24h: {
     successCount: number;
     failureCount: number;

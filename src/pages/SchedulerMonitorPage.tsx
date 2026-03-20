@@ -29,6 +29,7 @@ const JOB_GROUP_LABELS: Record<string, string> = {
   cache: '캐시',
   share: '공유',
   system: '시스템',
+  audit: '감사',
 };
 
 function formatDuration(ms: number | null): string {
@@ -60,6 +61,7 @@ export function SchedulerMonitorPage() {
   const [historyLimit, setHistoryLimit] = useState(20);
   const [loading, setLoading] = useState({ dashboard: false, jobs: false, history: false });
   const [triggerLoading, setTriggerLoading] = useState<string | null>(null);
+  const [pauseLoading, setPauseLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // ─── 데이터 로드 ───
@@ -118,6 +120,25 @@ export function SchedulerMonitorPage() {
     }
   }, [loadDashboard, loadHistory, selectedJob, historyLimit]);
 
+  // ─── 일시정지 / 재개 ───
+
+  const handleTogglePause = useCallback(async (job: ScheduledJobSummary) => {
+    const action = job.isPaused ? '재개' : '일시정지';
+    if (!confirm(`"${job.jobName}" 잡을 ${action}하시겠습니까?`)) return;
+    setPauseLoading(job.jobName);
+    try {
+      const api = job.isPaused ? schedulerApi.resumeJob : schedulerApi.pauseJob;
+      const { data } = await api(job.jobName);
+      alert(data.message);
+      loadDashboard();
+      loadJobs();
+    } catch (e: unknown) {
+      alert(`${action} 실패: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPauseLoading(null);
+    }
+  }, [loadDashboard, loadJobs]);
+
   // ─── 잡 선택 ───
 
   const handleSelectJob = useCallback((jobName: string) => {
@@ -169,7 +190,7 @@ export function SchedulerMonitorPage() {
       {loading.dashboard && !dashboard ? (
         <div className="text-center text-gray-500 py-8">대시보드 로딩 중...</div>
       ) : dashboard && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           {/* 총 잡 수 */}
           <div className="bg-white border rounded-lg p-4 shadow-sm">
             <div className="text-sm text-gray-500 mb-1">등록된 잡</div>
@@ -184,6 +205,21 @@ export function SchedulerMonitorPage() {
               <div className="mt-2 space-y-1">
                 {dashboard.runningNow.map((name) => (
                   <span key={name} className="inline-block text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded mr-1">
+                    {name}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* 일시정지 중 */}
+          <div className="bg-white border rounded-lg p-4 shadow-sm">
+            <div className="text-sm text-gray-500 mb-1">일시정지</div>
+            <div className="text-3xl font-bold text-orange-600">{dashboard.pausedJobs.length}</div>
+            {dashboard.pausedJobs.length > 0 && (
+              <div className="mt-2 space-y-1">
+                {dashboard.pausedJobs.map((name) => (
+                  <span key={name} className="inline-block text-xs bg-orange-100 text-orange-800 px-2 py-0.5 rounded mr-1">
                     {name}
                   </span>
                 ))}
@@ -236,21 +272,35 @@ export function SchedulerMonitorPage() {
               {jobs.map((job) => (
                 <li
                   key={job.jobName}
-                  className={`p-3 cursor-pointer hover:bg-gray-50 transition-colors ${selectedJob === job.jobName ? 'bg-blue-50 border-l-2 border-blue-500' : ''}`}
+                  className={`p-3 cursor-pointer hover:bg-gray-50 transition-colors ${selectedJob === job.jobName ? 'bg-blue-50 border-l-2 border-blue-500' : ''} ${job.isPaused ? 'opacity-60' : ''}`}
                   onClick={() => handleSelectJob(job.jobName)}
                 >
                   <div className="flex items-center justify-between">
                     <div className="min-w-0 flex-1">
-                      <div className="font-medium text-sm text-gray-900 truncate">{job.jobName}</div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-medium text-sm text-gray-900 truncate">{job.jobName}</span>
+                        {job.isPaused && (
+                          <span className="text-xs bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium shrink-0">
+                            정지
+                          </span>
+                        )}
+                      </div>
                       <div className="text-xs text-gray-500 mt-0.5">{job.jobDescription}</div>
                     </div>
-                    <div className="flex items-center gap-2 ml-2 shrink-0">
+                    <div className="flex items-center gap-1.5 ml-2 shrink-0">
                       <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded">
                         {JOB_GROUP_LABELS[job.jobGroup] || job.jobGroup}
                       </span>
                       <button
+                        onClick={(e) => { e.stopPropagation(); handleTogglePause(job); }}
+                        disabled={pauseLoading === job.jobName}
+                        className={`text-xs px-2 py-1 rounded transition-colors disabled:opacity-50 ${job.isPaused ? 'bg-green-500 text-white hover:bg-green-600' : 'bg-orange-500 text-white hover:bg-orange-600'}`}
+                      >
+                        {pauseLoading === job.jobName ? '...' : job.isPaused ? '재개' : '정지'}
+                      </button>
+                      <button
                         onClick={(e) => { e.stopPropagation(); handleTrigger(job.jobName); }}
-                        disabled={triggerLoading === job.jobName}
+                        disabled={triggerLoading === job.jobName || job.isPaused}
                         className="text-xs px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 disabled:opacity-50 transition-colors"
                       >
                         {triggerLoading === job.jobName ? '...' : '실행'}
